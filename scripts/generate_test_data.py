@@ -3,12 +3,12 @@ import sys
 
 def generate_test_csv(rows=100000, filename="test_data.csv"):
     """Generate test CSV file with numerical data"""
+    categories = ['A', 'B', 'C'] * (rows // 3 + 1)
     df = pd.DataFrame({
         'amount': range(1, rows + 1),
         'value': [i * 2 for i in range(1, rows + 1)],
-        'category': ['A', 'B', 'C'] * (rows // 3 + 1)
+        'category': categories[:rows]
     })
-    df = df.head(rows)
     df.to_csv(filename, index=False)
     print(f"Generated {filename} with {rows} rows")
 
