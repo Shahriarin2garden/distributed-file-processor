@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  ray-head:
+    image: rayproject/ray:2.9.2
+    command: ray start --head --dashboard-host 0.0.0.0 --num-cpus 4 --block
+    ports:
+      - "8265:8265"
+      - "10001:10001"
+      - "6379:6379"
+    volumes:
+      - ./app:/app
+      - ./storage:/storage
+    networks:
+      - ray-net
+    healthcheck:
+      test: ["CMD", "ray", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ray-worker:
+    image: rayproject/ray:2.9.2
+    command: ray start --address='ray-head:6379' --num-cpus 2 --block
+    depends_on:
+      ray-head:
+        condition: service_healthy
+    volumes:
+      - ./app:/app
+      - ./storage:/storage
+    networks:
+      - ray-net
+    deploy:
+      replicas: 2
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    networks:
+      - ray-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RAY_ADDRESS=ray://ray-head:10001
+      - STORAGE_TYPE=local
+      - STORAGE_PATH=/storage
+      - CHUNK_SIZE_ROWS=50000
+      - MAX_CONCURRENT_TASKS=8
+    depends_on:
+      ray-head:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./storage:/storage
+      - ./app:/app
+    networks:
+      - ray-net
+
+networks:
+  ray-net:
+    driver: bridge
