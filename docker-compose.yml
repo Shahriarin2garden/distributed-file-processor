@@ -1,40 +1,48 @@
 version: '3.8'
 
 services:
+
+  # ── Ray head node (GCS on :6379, dashboard on :8265, client on :10001) ──
   ray-head:
     image: rayproject/ray:2.9.2
-    command: ray start --head --dashboard-host 0.0.0.0 --num-cpus 4 --block
+    command: >
+      ray start --head
+      --dashboard-host 0.0.0.0
+      --num-cpus 4
+      --block
     ports:
-      - "8265:8265"
-      - "10001:10001"
-      - "6379:6379"
+      - "8265:8265"   # Ray dashboard
+      - "10001:10001" # Ray client connections
     volumes:
-      - ./app:/app
       - ./storage:/storage
     networks:
       - ray-net
     healthcheck:
       test: ["CMD", "ray", "status"]
       interval: 5s
-      timeout: 3s
-      retries: 5
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
+  # ── Ray workers ──────────────────────────────────────────────────────────
   ray-worker:
     image: rayproject/ray:2.9.2
+    # Workers connect to head GCS port (6379 inside ray-head container)
     command: ray start --address='ray-head:6379' --num-cpus 2 --block
     depends_on:
       ray-head:
         condition: service_healthy
     volumes:
-      - ./app:/app
       - ./storage:/storage
     networks:
       - ray-net
     deploy:
       replicas: 2
 
+  # ── Application Redis (job state + results) ──────────────────────────────
   redis:
     image: redis:7-alpine
+    # Expose on host port 6380 to avoid collision with Ray GCS if also exposed
     ports:
       - "6380:6379"
     networks:
@@ -45,6 +53,7 @@ services:
       timeout: 2s
       retries: 5
 
+  # ── FastAPI application ───────────────────────────────────────────────────
   api:
     build: .
     ports:
@@ -56,6 +65,10 @@ services:
       - STORAGE_PATH=/storage
       - CHUNK_SIZE_ROWS=50000
       - MAX_CONCURRENT_TASKS=8
+      - MAX_FILE_SIZE_MB=500
+      - ALLOWED_ORIGINS=*
+      # Uncomment and set in production:
+      # - API_KEY_SECRET=changeme
     depends_on:
       ray-head:
         condition: service_healthy
@@ -63,9 +76,14 @@ services:
         condition: service_healthy
     volumes:
       - ./storage:/storage
-      - ./app:/app
     networks:
       - ray-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 networks:
   ray-net:

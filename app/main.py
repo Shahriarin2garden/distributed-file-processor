@@ -1,34 +1,66 @@
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+import ray
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
 from app.api.v1.router import api_router
+from app.config import settings
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting Distributed File Processing System")
+    if not ray.is_initialized():
+        try:
+            ray.init(address=settings.ray_address, ignore_reinit_error=True)
+            logger.info(f"Ray initialized: {settings.ray_address}")
+        except Exception as exc:
+            logger.warning(f"Ray init failed ({exc}), falling back to local mode")
+            ray.init(ignore_reinit_error=True)
+    yield
+    logger.info("Shutting down Distributed File Processing System")
+    if ray.is_initialized():
+        ray.shutdown()
+
+
 app = FastAPI(
     title="Distributed File Processing System",
     description="Ray-powered distributed CSV/JSON processing with FastAPI",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
+# CORS — restrict in production via ALLOWED_ORIGINS env var
+_origins = [o.strip() for o in settings.allowed_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_origins,
+    allow_credentials="*" not in _origins,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Optional API key gate. Disabled when API_KEY_SECRET is unset."""
+    if settings.api_key_secret:
+        public_paths = {"/health", "/docs", "/openapi.json", "/redoc"}
+        if request.url.path not in public_paths:
+            key = request.headers.get("X-API-Key")
+            if not key or key != settings.api_key_secret:
+                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
+
 
 app.include_router(api_router, prefix="/api/v1")
 
-@app.get("/health")
+
+@app.get("/health", tags=["health"])
 async def health_check():
-    return {"status": "healthy"}
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting Distributed File Processing System")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Shutting down Distributed File Processing System")
+    return {"status": "healthy", "ray_initialized": ray.is_initialized()}

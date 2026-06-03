@@ -1,17 +1,21 @@
-from pydantic import BaseModel
-from typing import Optional
 from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel
+
 
 class OperationType(str, Enum):
     SUM = "sum"
     MEAN = "mean"
     FILTER = "filter"
 
+
 class JobStatus(str, Enum):
     UPLOADED = "uploaded"
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
 
 class JobMetadata(BaseModel):
     job_id: str
@@ -26,20 +30,24 @@ class JobMetadata(BaseModel):
     progress: float = 0.0
     error_message: Optional[str] = None
 
+
 class UploadResponse(BaseModel):
     job_id: str
     status: str
     estimated_chunks: int
 
+
 class ProcessResponse(BaseModel):
     job_id: str
     status: str
+
 
 class StatusResponse(BaseModel):
     job_id: str
     status: str
     progress: float
     error_message: Optional[str] = None
+
 
 class ResultResponse(BaseModel):
     job_id: str
