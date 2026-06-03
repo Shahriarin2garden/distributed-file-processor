@@ -65,9 +65,18 @@ jobs:
       - name: Build Docker image
         run: docker build -t distributed-file-processor .
 
-      - name: Smoke test with Docker Compose
+      - name: Smoke test (API + Redis, local Ray — no ray-head image needed)
         run: |
-          docker compose up -d api redis
-          sleep 20
+          docker run -d --name smoke-redis -p 6379:6379 redis:7-alpine
+          sleep 3
+          docker run -d --name smoke-api \
+            -p 8000:8000 \
+            --link smoke-redis:redis \
+            -e REDIS_URL=redis://redis:6379 \
+            -e RAY_ADDRESS=local \
+            -e STORAGE_PATH=/tmp/storage \
+            -e MAX_FILE_SIZE_MB=10 \
+            distributed-file-processor
+          sleep 25
           curl --fail --retry 5 --retry-delay 3 http://localhost:8000/health
-          docker compose down
+          docker stop smoke-api smoke-redis

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
 
   # ── Ray head node (GCS on :6379, dashboard on :8265, client on :10001) ──
