@@ -52,10 +52,10 @@ async def upload_file(
     if not column or not column.isprintable() or len(column) > 128:
         raise HTTPException(status_code=400, detail="Invalid column name")
 
-    # chunk_size bounds
-    if not (100 <= chunk_size_rows <= 500_000):
+    # chunk_size bounds (file size limit already caps total chunk count)
+    if not (1 <= chunk_size_rows <= 500_000):
         raise HTTPException(
-            status_code=400, detail="chunk_size_rows must be between 100 and 500 000"
+            status_code=400, detail="chunk_size_rows must be between 1 and 500 000"
         )
 
     # filter_value required for filter op

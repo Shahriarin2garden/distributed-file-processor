@@ -72,7 +72,7 @@ class TestUploadValidation:
     def test_invalid_chunk_size_returns_400(self, client, sample_csv_bytes):
         r = client.post(
             "/api/v1/upload",
-            data={"operation": "sum", "column": "amount", "chunk_size_rows": "5"},
+            data={"operation": "sum", "column": "amount", "chunk_size_rows": "0"},
             files={"file": ("data.csv", sample_csv_bytes, "text/csv")},
         )
         assert r.status_code == 400
