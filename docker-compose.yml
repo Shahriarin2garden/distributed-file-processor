@@ -2,10 +2,11 @@ services:
 
   # ── Ray head node (GCS on :6379, dashboard on :8265, client on :10001) ──
   ray-head:
-    image: rayproject/ray:2.9.2
+    image: rayproject/ray:2.9.2-py311
     command: >
       ray start --head
       --dashboard-host 0.0.0.0
+      --ray-client-server-port 10001
       --num-cpus 4
       --block
     ports:
@@ -24,7 +25,7 @@ services:
 
   # ── Ray workers ──────────────────────────────────────────────────────────
   ray-worker:
-    image: rayproject/ray:2.9.2
+    image: rayproject/ray:2.9.2-py311
     # Workers connect to head GCS port (6379 inside ray-head container)
     command: ray start --address='ray-head:6379' --num-cpus 2 --block
     depends_on:
@@ -77,11 +78,11 @@ services:
     networks:
       - ray-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 40s
 
 networks:
   ray-net:

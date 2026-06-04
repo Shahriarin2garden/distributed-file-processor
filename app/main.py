@@ -1,3 +1,5 @@
+import asyncio
+import os
 from contextlib import asynccontextmanager
 
 import ray
@@ -16,11 +18,22 @@ logger = setup_logger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting Distributed File Processing System")
     if not ray.is_initialized():
-        try:
-            ray.init(address=settings.ray_address, ignore_reinit_error=True)
-            logger.info(f"Ray initialized: {settings.ray_address}")
-        except Exception as exc:
-            logger.warning(f"Ray init failed ({exc}), falling back to local mode")
+        last_exc: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                ray.init(address=settings.ray_address, ignore_reinit_error=True)
+                logger.info(f"Ray initialized: {settings.ray_address} (attempt {attempt})")
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(f"Ray connect attempt {attempt} failed: {exc}")
+                if attempt < 3:
+                    await asyncio.sleep(15)
+        if last_exc is not None:
+            logger.warning("All Ray connect attempts failed — starting in local mode")
+            # Remove RAY_ADDRESS so ray.init() starts a new local cluster
+            os.environ.pop("RAY_ADDRESS", None)
             ray.init(ignore_reinit_error=True)
     yield
     logger.info("Shutting down Distributed File Processing System")
