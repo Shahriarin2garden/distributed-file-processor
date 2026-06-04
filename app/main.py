@@ -1,15 +1,19 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import ray
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.config import settings
 from app.utils.logger import setup_logger
+
+_FRONTEND = Path(__file__).parent.parent / "frontend"
 
 logger = setup_logger(__name__)
 
@@ -63,8 +67,8 @@ app.add_middleware(
 async def api_key_middleware(request: Request, call_next):
     """Optional API key gate. Disabled when API_KEY_SECRET is unset."""
     if settings.api_key_secret:
-        public_paths = {"/health", "/docs", "/openapi.json", "/redoc"}
-        if request.url.path not in public_paths:
+        public_paths = {"/health", "/docs", "/openapi.json", "/redoc", "/"}
+        if request.url.path not in public_paths and not request.url.path.startswith("/static"):
             key = request.headers.get("X-API-Key")
             if not key or key != settings.api_key_secret:
                 return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
@@ -72,6 +76,14 @@ async def api_key_middleware(request: Request, call_next):
 
 
 app.include_router(api_router, prefix="/api/v1")
+
+# Serve the frontend SPA
+if _FRONTEND.exists():
+    app.mount("/static", StaticFiles(directory=str(_FRONTEND)), name="frontend")
+
+    @app.get("/", include_in_schema=False)
+    async def serve_ui():
+        return FileResponse(str(_FRONTEND / "index.html"))
 
 
 @app.get("/health", tags=["health"])

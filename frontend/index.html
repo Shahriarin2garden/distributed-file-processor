@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Distributed File Processor</title>
+<style>
+/* ── Reset & base ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #080c17;
+  --bg2:       #0d1224;
+  --bg3:       #131929;
+  --surface:   rgba(255,255,255,.035);
+  --surfaceH:  rgba(255,255,255,.06);
+  --border:    rgba(99,147,255,.14);
+  --borderH:   rgba(99,147,255,.32);
+  --blue:      #3b82f6;
+  --blue-dim:  #1d4ed8;
+  --cyan:      #06b6d4;
+  --green:     #10b981;
+  --amber:     #f59e0b;
+  --red:       #f43f5e;
+  --purple:    #8b5cf6;
+  --txt:       #e2e8f0;
+  --txt2:      #94a3b8;
+  --txt3:      #475569;
+  --radius:    14px;
+  --radius-sm: 8px;
+  --shadow:    0 4px 32px rgba(0,0,0,.6);
+  --glow:      0 0 40px rgba(59,130,246,.12);
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+  min-height: 100vh;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+/* ── Animated background mesh ─────────────────────────────────────────── */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% -10%, rgba(59,130,246,.08) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 110%, rgba(139,92,246,.06) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 40% at 50% 50%, rgba(6,182,212,.04) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Layout ───────────────────────────────────────────────────────────── */
+.app { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 0 24px 80px; }
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 28px 0 32px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 36px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.brand { display: flex; align-items: center; gap: 14px; }
+
+.brand-icon {
+  width: 44px; height: 44px;
+  background: linear-gradient(135deg, var(--blue), var(--purple));
+  border-radius: 12px;
+  display: grid; place-items: center;
+  font-size: 22px;
+  box-shadow: 0 0 20px rgba(59,130,246,.35);
+  flex-shrink: 0;
+}
+
+.brand-text h1 { font-size: 1.3rem; font-weight: 700; letter-spacing: -.02em; }
+.brand-text p  { font-size: .78rem; color: var(--txt2); margin-top: 1px; }
+
+.header-badges { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.badge {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: .75rem; font-weight: 500;
+  backdrop-filter: blur(8px);
+  transition: border-color .2s, background .2s;
+}
+.badge:hover { border-color: var(--borderH); background: var(--surfaceH); }
+
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--txt3);
+  transition: background .3s;
+}
+.dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.dot.red   { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+.dot.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.dot.pulse { animation: pulse 1.8s ease-in-out infinite; }
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* ── Main grid ────────────────────────────────────────────────────────── */
+.grid-main {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 900px) { .grid-main { grid-template-columns: 1fr; } }
+
+/* ── Cards ────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow), var(--glow);
+  overflow: hidden;
+  transition: border-color .2s, box-shadow .2s;
+}
+.card:hover { border-color: var(--borderH); }
+
+.card-header {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
+.card-title {
+  font-size: .8rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--txt2);
+  display: flex; align-items: center; gap: 8px;
+}
+.card-title svg { opacity: .7; }
+.card-body { padding: 22px; }
+
+/* ── Upload zone ──────────────────────────────────────────────────────── */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 32px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+  position: relative;
+  background: rgba(59,130,246,.02);
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--blue);
+  background: rgba(59,130,246,.06);
+}
+.drop-zone input[type="file"] {
+  position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+}
+.drop-icon {
+  font-size: 2rem; margin-bottom: 10px;
+  filter: drop-shadow(0 0 12px rgba(59,130,246,.4));
+}
+.drop-zone h3 { font-size: .95rem; font-weight: 600; margin-bottom: 4px; }
+.drop-zone p  { font-size: .78rem; color: var(--txt2); }
+
+.file-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--borderH);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: .78rem;
+  margin-top: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-type-badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.file-type-badge.csv  { background: rgba(16,185,129,.2); color: var(--green); }
+.file-type-badge.json { background: rgba(245,158,11,.2); color: var(--amber); }
+
+/* ── Form elements ────────────────────────────────────────────────────── */
+.form-group { margin-top: 18px; }
+.form-label {
+  display: block;
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--txt2);
+  margin-bottom: 8px;
+}
+.form-input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  color: var(--txt);
+  font-size: .88rem;
+  font-family: inherit;
+  transition: border-color .2s, box-shadow .2s;
+  outline: none;
+}
+.form-input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+}
+.form-input::placeholder { color: var(--txt3); }
+
+.op-tabs { display: flex; gap: 6px; }
+.op-tab {
+  flex: 1;
+  padding: 9px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--txt2);
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all .18s;
+  font-family: inherit;
+}
+.op-tab:hover { border-color: var(--borderH); color: var(--txt); }
+.op-tab.active {
+  border-color: var(--blue);
+  background: rgba(59,130,246,.15);
+  color: var(--blue);
+  box-shadow: 0 0 12px rgba(59,130,246,.2);
+}
+
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+
+.filter-section { margin-top: 18px; display: none; }
+.filter-section.visible { display: block; }
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px 22px;
+  border-radius: var(--radius-sm);
+  font-size: .88rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition: all .18s;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--blue), var(--blue-dim));
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(59,130,246,.35);
+  width: 100%;
+  margin-top: 22px;
+  padding: 13px;
+  font-size: .92rem;
+}
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(59,130,246,.5);
+}
+.btn-primary:active:not(:disabled) { transform: translateY(0); }
+.btn-primary:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--txt2);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  font-size: .75rem;
+}
+.btn-ghost:hover { background: var(--surfaceH); color: var(--txt); border-color: var(--borderH); }
+.btn-danger {
+  background: rgba(244,63,94,.1);
+  border: 1px solid rgba(244,63,94,.25);
+  color: var(--red);
+  padding: 5px 10px; font-size: .72rem;
+}
+.btn-danger:hover { background: rgba(244,63,94,.2); }
+
+/* ── Right column ─────────────────────────────────────────────────────── */
+.right-col { display: flex; flex-direction: column; gap: 20px; }
+
+/* ── Job items ────────────────────────────────────────────────────────── */
+.job-list { display: flex; flex-direction: column; gap: 12px; }
+.empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--txt3);
+  font-size: .85rem;
+}
+.empty-icon { font-size: 2rem; margin-bottom: 10px; opacity: .4; }
+
+.job-item {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  transition: border-color .2s;
+  animation: slideIn .25s ease-out;
+}
+.job-item:hover { border-color: var(--borderH); }
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.job-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.job-id { font-size: .72rem; font-family: monospace; color: var(--txt2); }
+.job-meta { display: flex; align-items: center; gap: 8px; font-size: .78rem; }
+
+.status-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.status-badge.uploaded  { background: rgba(148,163,184,.1); color: var(--txt2); border: 1px solid rgba(148,163,184,.2); }
+.status-badge.processing { background: rgba(59,130,246,.15); color: var(--blue); border: 1px solid rgba(59,130,246,.25); }
+.status-badge.completed { background: rgba(16,185,129,.15); color: var(--green); border: 1px solid rgba(16,185,129,.25); }
+.status-badge.failed    { background: rgba(244,63,94,.12); color: var(--red); border: 1px solid rgba(244,63,94,.25); }
+
+.job-info { display: flex; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
+.job-chip {
+  font-size: .72rem; color: var(--txt2);
+  background: var(--surface);
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  display: flex; align-items: center; gap: 4px;
+}
+.job-chip span { color: var(--txt); font-weight: 500; }
+
+/* ── Progress bar ─────────────────────────────────────────────────────── */
+.progress-wrap {
+  background: rgba(255,255,255,.05);
+  border-radius: 999px;
+  height: 6px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--blue), var(--cyan));
+  transition: width .5s cubic-bezier(.4,0,.2,1);
+  box-shadow: 0 0 10px rgba(59,130,246,.6);
+  position: relative;
+  overflow: hidden;
+}
+.progress-bar::after {
+  content: "";
+  position: absolute;
+  top: 0; left: -100%; right: -100%; bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.3), transparent);
+  animation: shimmer 1.5s linear infinite;
+}
+@keyframes shimmer { to { transform: translateX(200%); } }
+
+.progress-label {
+  display: flex; justify-content: space-between;
+  font-size: .7rem; color: var(--txt3);
+  margin-top: 6px;
+}
+.progress-pct { font-weight: 600; color: var(--blue); }
+
+/* ── Result card ──────────────────────────────────────────────────────── */
+.result-display {
+  text-align: center;
+  padding: 24px 20px;
+}
+.result-op-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--txt3);
+  margin-bottom: 6px;
+}
+.result-expr {
+  font-size: .85rem;
+  color: var(--txt2);
+  margin-bottom: 18px;
+  font-family: monospace;
+}
+.result-value {
+  font-size: 3rem;
+  font-weight: 800;
+  letter-spacing: -.04em;
+  background: linear-gradient(135deg, var(--cyan), var(--blue), var(--purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+  margin-bottom: 8px;
+  transition: all .3s;
+}
+.result-job-id {
+  font-size: .68rem;
+  color: var(--txt3);
+  font-family: monospace;
+}
+
+/* ── History table ────────────────────────────────────────────────────── */
+.history-wrap { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .8rem;
+}
+thead th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--txt3);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+tbody td {
+  padding: 11px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  color: var(--txt2);
+  vertical-align: middle;
+}
+tbody tr:hover td { background: var(--surface); }
+tbody tr:last-child td { border-bottom: none; }
+td.mono { font-family: monospace; font-size: .75rem; }
+td.result-val { font-weight: 700; color: var(--txt); }
+
+/* ── Toasts ───────────────────────────────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  bottom: 28px; right: 28px;
+  display: flex; flex-direction: column; gap: 10px;
+  z-index: 9999;
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: flex-start; gap: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  min-width: 280px; max-width: 380px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  animation: toastIn .25s cubic-bezier(.34,1.56,.64,1);
+  pointer-events: all;
+}
+.toast.removing { animation: toastOut .2s ease-in forwards; }
+.toast-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+.toast-body {}
+.toast-title { font-size: .82rem; font-weight: 700; margin-bottom: 2px; }
+.toast-msg   { font-size: .76rem; color: var(--txt2); }
+.toast.success { border-left: 3px solid var(--green); }
+.toast.error   { border-left: 3px solid var(--red); }
+.toast.info    { border-left: 3px solid var(--blue); }
+.toast.warning { border-left: 3px solid var(--amber); }
+
+@keyframes toastIn  { from { opacity:0; transform:translateY(12px) scale(.96) } to { opacity:1; transform:translateY(0) scale(1) } }
+@keyframes toastOut { to   { opacity:0; transform:translateY(8px) scale(.96) } }
+
+/* ── Loading spinner ──────────────────────────────────────────────────── */
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Misc ─────────────────────────────────────────────────────────────── */
+.section-gap { margin-top: 24px; }
+.txt-muted { color: var(--txt2); }
+.txt-tiny  { font-size: .72rem; color: var(--txt3); }
+hr.divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.gap-8 { gap: 8px; }
+</style>
+</head>
+
+<body>
+<div class="app">
+
+  <!-- ── Header ─────────────────────────────────────────────────────── -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-text">
+        <h1>Distributed File Processor</h1>
+        <p>Ray · FastAPI · Redis · Parallel chunk processing</p>
+      </div>
+    </div>
+    <div class="header-badges">
+      <div class="badge" id="badge-api">
+        <div class="dot" id="dot-api"></div>
+        <span id="label-api">API connecting…</span>
+      </div>
+      <div class="badge" id="badge-ray">
+        <div class="dot" id="dot-ray"></div>
+        <span id="label-ray">Ray unknown</span>
+      </div>
+      <div class="badge">
+        <div class="dot green"></div>
+        <span id="label-jobs">0 active jobs</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Main grid ──────────────────────────────────────────────────── -->
+  <div class="grid-main">
+
+    <!-- LEFT: Upload card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          New Job
+        </div>
+        <button class="btn btn-ghost" id="btn-reset" onclick="resetForm()">Clear</button>
+      </div>
+      <div class="card-body">
+
+        <!-- Drop zone -->
+        <div class="drop-zone" id="drop-zone">
+          <input type="file" id="file-input" accept=".csv,.json,text/csv,application/json,text/plain">
+          <div class="drop-icon">📂</div>
+          <h3>Drop file here</h3>
+          <p>CSV or JSON — up to 500 MB</p>
+          <div id="file-pill" style="display:none">
+            <div class="file-pill">
+              <span class="file-type-badge" id="file-type-badge">CSV</span>
+              <span id="file-name-label">filename.csv</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Operation -->
+        <div class="form-group">
+          <label class="form-label">Operation</label>
+          <div class="op-tabs">
+            <button class="op-tab active" data-op="sum" onclick="selectOp(this)">
+              Σ Sum
+            </button>
+            <button class="op-tab" data-op="mean" onclick="selectOp(this)">
+              x̄ Mean
+            </button>
+            <button class="op-tab" data-op="filter" onclick="selectOp(this)">
+              ⊆ Filter
+            </button>
+          </div>
+        </div>
+
+        <!-- Column name -->
+        <div class="form-group">
+          <label class="form-label">Column name</label>
+          <input id="inp-column" class="form-input" type="text" placeholder="e.g. amount" autocomplete="off">
+        </div>
+
+        <!-- Filter value (only for filter op) -->
+        <div class="filter-section" id="filter-section">
+          <label class="form-label">Filter value</label>
+          <input id="inp-filter" class="form-input" type="text" placeholder="e.g. A" autocomplete="off">
+        </div>
+
+        <!-- Chunk size -->
+        <div class="form-row">
+          <div>
+            <label class="form-label">Chunk size (rows)</label>
+            <input id="inp-chunk" class="form-input" type="number" value="50000" min="1" max="500000">
+          </div>
+          <div>
+            <label class="form-label">Est. chunks</label>
+            <input id="inp-est-chunks" class="form-input" type="text" value="—" readonly style="color:var(--txt3)">
+          </div>
+        </div>
+
+        <!-- Submit -->
+        <button class="btn btn-primary" id="btn-submit" onclick="submitJob()" disabled>
+          <span id="btn-submit-label">Select a file first</span>
+        </button>
+
+      </div>
+    </div>
+
+    <!-- RIGHT: Active jobs + Latest result -->
+    <div class="right-col">
+
+      <!-- Active / recent jobs -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Active Jobs
+          </div>
+          <span class="txt-tiny" id="poll-label"></span>
+        </div>
+        <div class="card-body" style="padding:14px 16px">
+          <div id="job-list" class="job-list">
+            <div class="empty-state">
+              <div class="empty-icon">🔮</div>
+              <p>No jobs yet — upload a file to begin</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Latest result -->
+      <div class="card" id="result-card" style="display:none">
+        <div class="card-header">
+          <div class="card-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Latest Result
+          </div>
+        </div>
+        <div class="result-display">
+          <div class="result-op-label" id="res-op-label">SUM</div>
+          <div class="result-expr" id="res-expr">sum(column)</div>
+          <div class="result-value" id="res-value">0</div>
+          <div class="result-job-id" id="res-job-id"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Job history ─────────────────────────────────────────────────── -->
+  <div class="card section-gap" id="history-card" style="display:none">
+    <div class="card-header">
+      <div class="card-title">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Job History
+      </div>
+      <button class="btn btn-ghost" onclick="clearHistory()">Clear history</button>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="history-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>File</th>
+              <th>Operation</th>
+              <th>Column</th>
+              <th>Status</th>
+              <th>Result</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /.app -->
+
+<!-- ── Toasts ──────────────────────────────────────────────────────────── -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────
+const API = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? `http://${window.location.host}`
+  : '';  // same origin when served from FastAPI
+
+// ── State ────────────────────────────────────────────────────────────────
+let selectedFile = null;
+let selectedOp   = 'sum';
+let activeJobs   = {};      // jobId -> {metadata}
+let history      = JSON.parse(localStorage.getItem('dfps_history') || '[]');
+let pollTimer    = null;
+
+// ── Init ─────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  checkHealth();
+  renderHistory();
+  setInterval(checkHealth, 15000);
+  setupDropZone();
+  startPoll();
+  // Restore any jobs from a previous session that were in-flight
+  const saved = JSON.parse(localStorage.getItem('dfps_active') || '[]');
+  saved.forEach(j => { activeJobs[j.job_id] = j; });
+  if (saved.length) renderJobs();
+});
+
+// ── Health check ─────────────────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const r = await fetch(`${API}/health`);
+    const d = await r.json();
+    setDot('api', 'green', 'API online');
+    setDot('ray', d.ray_initialized ? 'green' : 'amber',
+           d.ray_initialized ? 'Ray connected' : 'Ray local');
+  } catch {
+    setDot('api', 'red', 'API offline');
+    setDot('ray', '',    'Ray unknown');
+  }
+}
+function setDot(id, cls, label) {
+  const dot = document.getElementById(`dot-${id}`);
+  const lbl = document.getElementById(`label-${id}`);
+  dot.className = `dot ${cls} ${cls === 'amber' ? 'pulse' : ''}`;
+  lbl.textContent = label;
+}
+
+// ── File handling ─────────────────────────────────────────────────────────
+function setupDropZone() {
+  const zone  = document.getElementById('drop-zone');
+  const input = document.getElementById('file-input');
+
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  });
+  input.addEventListener('change', () => {
+    if (input.files[0]) handleFile(input.files[0]);
+  });
+}
+
+function handleFile(file) {
+  selectedFile = file;
+  const ext = file.name.split('.').pop().toLowerCase();
+  const type = (ext === 'json') ? 'json' : 'csv';
+
+  document.getElementById('file-type-badge').textContent = type.toUpperCase();
+  document.getElementById('file-type-badge').className   = `file-type-badge ${type}`;
+  document.getElementById('file-name-label').textContent = file.name;
+  document.getElementById('file-pill').style.display     = 'block';
+
+  const sizeMB = (file.size / 1048576).toFixed(1);
+  document.getElementById('drop-zone').querySelector('h3').textContent = 'File selected';
+  document.getElementById('drop-zone').querySelector('p').textContent  = `${sizeMB} MB`;
+
+  updateSubmitBtn();
+  estimateChunks();
+}
+
+async function estimateChunks() {
+  if (!selectedFile) return;
+  const chunk = parseInt(document.getElementById('inp-chunk').value) || 50000;
+  const sizeMB = selectedFile.size / 1048576;
+  // Rough estimate: ~50 bytes per row for CSV
+  const est = Math.max(1, Math.ceil(selectedFile.size / 50 / chunk));
+  document.getElementById('inp-est-chunks').value = `~${est}`;
+}
+
+document.getElementById('inp-chunk').addEventListener('input', estimateChunks);
+
+// ── Operation selector ────────────────────────────────────────────────────
+function selectOp(btn) {
+  document.querySelectorAll('.op-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  selectedOp = btn.dataset.op;
+  const fs = document.getElementById('filter-section');
+  fs.classList.toggle('visible', selectedOp === 'filter');
+}
+
+// ── Submit button state ───────────────────────────────────────────────────
+function updateSubmitBtn() {
+  const btn  = document.getElementById('btn-submit');
+  const lbl  = document.getElementById('btn-submit-label');
+  const col  = document.getElementById('inp-column').value.trim();
+  const fval = document.getElementById('inp-filter').value.trim();
+
+  if (!selectedFile) {
+    btn.disabled = true; lbl.textContent = 'Select a file first'; return;
+  }
+  if (!col) {
+    btn.disabled = true; lbl.textContent = 'Enter column name'; return;
+  }
+  if (selectedOp === 'filter' && !fval) {
+    btn.disabled = true; lbl.textContent = 'Enter filter value'; return;
+  }
+  btn.disabled = false;
+  lbl.textContent = `Start ${selectedOp.toUpperCase()} job`;
+}
+['inp-column','inp-filter','inp-chunk'].forEach(id =>
+  document.getElementById(id).addEventListener('input', updateSubmitBtn)
+);
+
+// ── Submit job ────────────────────────────────────────────────────────────
+async function submitJob() {
+  if (!selectedFile) return;
+  const column     = document.getElementById('inp-column').value.trim();
+  const filterVal  = document.getElementById('inp-filter').value.trim();
+  const chunkSize  = parseInt(document.getElementById('inp-chunk').value) || 50000;
+
+  const btn = document.getElementById('btn-submit');
+  const lbl = document.getElementById('btn-submit-label');
+  btn.disabled = true;
+  lbl.innerHTML = '<span class="spinner"></span> Uploading…';
+
+  try {
+    // 1. Upload
+    const form = new FormData();
+    form.append('file',            selectedFile);
+    form.append('operation',       selectedOp);
+    form.append('column',          column);
+    form.append('chunk_size_rows', chunkSize);
+    if (selectedOp === 'filter') form.append('filter_value', filterVal);
+
+    const uploadRes = await fetch(`${API}/api/v1/upload`, { method: 'POST', body: form });
+    if (!uploadRes.ok) {
+      const err = await uploadRes.json();
+      throw new Error(err.detail || `Upload failed (${uploadRes.status})`);
+    }
+    const uploaded = await uploadRes.json();
+    const jobId = uploaded.job_id;
+
+    toast('success', 'Uploaded', `Job ${shortId(jobId)} — ${uploaded.estimated_chunks} chunks`);
+
+    // 2. Process
+    lbl.innerHTML = '<span class="spinner"></span> Starting…';
+    const procRes = await fetch(`${API}/api/v1/process/${jobId}`, { method: 'POST' });
+    if (!procRes.ok) {
+      const err = await procRes.json();
+      throw new Error(err.detail || `Process start failed (${procRes.status})`);
+    }
+
+    // 3. Track locally
+    activeJobs[jobId] = {
+      job_id:    jobId,
+      filename:  selectedFile.name,
+      operation: selectedOp,
+      column,
+      filter_value: filterVal || null,
+      status:    'processing',
+      progress:  0,
+      started:   new Date().toISOString(),
+    };
+    saveActive();
+    addHistory({ ...activeJobs[jobId] });
+    renderJobs();
+    toast('info', 'Processing', `${selectedOp}(${column}) dispatched to Ray workers`);
+    resetForm();
+
+  } catch (e) {
+    toast('error', 'Error', e.message);
+    btn.disabled = false;
+    lbl.textContent = `Start ${selectedOp.toUpperCase()} job`;
+  }
+}
+
+// ── Polling ───────────────────────────────────────────────────────────────
+function startPoll() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollJobs, 2500);
+}
+
+async function pollJobs() {
+  const ids = Object.keys(activeJobs).filter(
+    id => !['completed','failed'].includes(activeJobs[id].status)
+  );
+  if (!ids.length) {
+    document.getElementById('poll-label').textContent = '';
+    updateActiveBadge();
+    return;
+  }
+  document.getElementById('poll-label').textContent = `Polling every 2.5s`;
+
+  await Promise.all(ids.map(async jobId => {
+    try {
+      const r = await fetch(`${API}/api/v1/status/${jobId}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      activeJobs[jobId] = { ...activeJobs[jobId], ...d };
+
+      if (d.status === 'completed') {
+        // Fetch result
+        const rr = await fetch(`${API}/api/v1/result/${jobId}`);
+        if (rr.ok) {
+          const rd = await rr.json();
+          activeJobs[jobId].result = rd.result;
+          showResult(activeJobs[jobId]);
+          toast('success', 'Completed', `${d.status} — ${activeJobs[jobId].operation}(${activeJobs[jobId].column}) = ${fmtNum(rd.result)}`);
+          updateHistoryJob(jobId, activeJobs[jobId]);
+        }
+      } else if (d.status === 'failed') {
+        toast('error', 'Job Failed', d.error_message || 'Unknown error');
+        updateHistoryJob(jobId, activeJobs[jobId]);
+      }
+    } catch { /* silent */ }
+  }));
+
+  saveActive();
+  renderJobs();
+  updateActiveBadge();
+}
+
+// ── Render active jobs ────────────────────────────────────────────────────
+function renderJobs() {
+  const container = document.getElementById('job-list');
+  const jobs = Object.values(activeJobs).sort((a,b) =>
+    new Date(b.started||0) - new Date(a.started||0)
+  ).slice(0, 8);
+
+  if (!jobs.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">🔮</div><p>No jobs yet — upload a file to begin</p></div>`;
+    return;
+  }
+
+  container.innerHTML = jobs.map(j => {
+    const prog = Math.round(j.progress || 0);
+    const isActive = !['completed','failed'].includes(j.status);
+    const resultLine = j.result != null
+      ? `<div style="margin-top:10px;font-size:.8rem;color:var(--green);font-weight:700">
+           Result: ${fmtNum(j.result)}
+         </div>`
+      : j.status === 'failed'
+      ? `<div style="margin-top:8px;font-size:.76rem;color:var(--red)">${j.error_message || 'Failed'}</div>`
+      : '';
+
+    return `
+    <div class="job-item" id="job-${j.job_id}">
+      <div class="job-header">
+        <span class="job-id">${j.job_id}</span>
+        <div class="job-meta">
+          <span class="status-badge ${j.status}">${isActive ? '<span class="spinner" style="width:8px;height:8px;border-width:1.5px"></span> ' : ''}${j.status}</span>
+          <button class="btn btn-danger" onclick="removeJob('${j.job_id}')">✕</button>
+        </div>
+      </div>
+      <div class="job-info">
+        <div class="job-chip">Op <span>${j.operation}</span></div>
+        <div class="job-chip">Col <span>${j.column}</span></div>
+        ${j.filter_value ? `<div class="job-chip">Val <span>${j.filter_value}</span></div>` : ''}
+        <div class="job-chip">📄 <span>${j.filename || 'file'}</span></div>
+      </div>
+      ${isActive ? `
+        <div class="progress-wrap">
+          <div class="progress-bar" style="width:${prog}%"></div>
+        </div>
+        <div class="progress-label">
+          <span>${j.status === 'processing' ? 'Processing chunks…' : j.status}</span>
+          <span class="progress-pct">${prog}%</span>
+        </div>` : ''}
+      ${resultLine}
+    </div>`;
+  }).join('');
+}
+
+function removeJob(jobId) {
+  delete activeJobs[jobId];
+  saveActive();
+  renderJobs();
+  updateActiveBadge();
+}
+
+function saveActive() {
+  localStorage.setItem('dfps_active', JSON.stringify(Object.values(activeJobs)));
+}
+
+function updateActiveBadge() {
+  const n = Object.values(activeJobs).filter(j => j.status === 'processing').length;
+  document.getElementById('label-jobs').textContent = `${n} active job${n !== 1 ? 's' : ''}`;
+}
+
+// ── Show result ───────────────────────────────────────────────────────────
+let countAnimFrame = null;
+function showResult(job) {
+  const card = document.getElementById('result-card');
+  card.style.display = 'block';
+
+  document.getElementById('res-op-label').textContent = job.operation.toUpperCase();
+  document.getElementById('res-expr').textContent     = `${job.operation}(${job.column})`;
+  document.getElementById('res-job-id').textContent   = `job: ${shortId(job.job_id)}`;
+
+  // Animated counter
+  const el    = document.getElementById('res-value');
+  const end   = job.result;
+  const start = parseFloat(el.dataset.last || 0);
+  const dur   = 1200;
+  const t0    = performance.now();
+  el.dataset.last = end;
+
+  if (countAnimFrame) cancelAnimationFrame(countAnimFrame);
+  function tick(now) {
+    const pct = Math.min((now - t0) / dur, 1);
+    const ease = 1 - Math.pow(1 - pct, 4);
+    el.textContent = fmtNum(start + (end - start) * ease);
+    if (pct < 1) countAnimFrame = requestAnimationFrame(tick);
+  }
+  countAnimFrame = requestAnimationFrame(tick);
+}
+
+// ── History ───────────────────────────────────────────────────────────────
+function addHistory(job) {
+  history.unshift({ ...job, id: job.job_id });
+  history = history.slice(0, 50);
+  saveHistory();
+  renderHistory();
+}
+function updateHistoryJob(jobId, job) {
+  const idx = history.findIndex(h => h.id === jobId);
+  if (idx >= 0) { history[idx] = { ...history[idx], ...job }; saveHistory(); renderHistory(); }
+}
+function saveHistory() { localStorage.setItem('dfps_history', JSON.stringify(history)); }
+function clearHistory() { history = []; saveHistory(); renderHistory(); }
+
+function renderHistory() {
+  const card  = document.getElementById('history-card');
+  const tbody = document.getElementById('history-tbody');
+  if (!history.length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  tbody.innerHTML = history.map(j => `
+  <tr>
+    <td class="mono">${shortId(j.id || j.job_id)}</td>
+    <td class="txt-muted" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${j.filename||''}">${j.filename || '—'}</td>
+    <td><span class="status-badge ${j.operation}" style="background:rgba(99,147,255,.1);color:#6393ff;border-color:rgba(99,147,255,.2)">${j.operation}</span></td>
+    <td class="mono txt-muted">${j.column}</td>
+    <td><span class="status-badge ${j.status}">${j.status}</span></td>
+    <td class="result-val">${j.result != null ? fmtNum(j.result) : j.status === 'failed' ? '<span style="color:var(--red)">✕ error</span>' : '<span style="color:var(--txt3)">—</span>'}</td>
+    <td class="txt-tiny">${j.started ? timeAgo(j.started) : '—'}</td>
+  </tr>`).join('');
+}
+
+// ── Reset form ────────────────────────────────────────────────────────────
+function resetForm() {
+  selectedFile = null;
+  document.getElementById('file-input').value = '';
+  document.getElementById('file-pill').style.display = 'none';
+  document.getElementById('drop-zone').querySelector('h3').textContent = 'Drop file here';
+  document.getElementById('drop-zone').querySelector('p').textContent  = 'CSV or JSON — up to 500 MB';
+  document.getElementById('inp-column').value = '';
+  document.getElementById('inp-filter').value = '';
+  document.getElementById('inp-chunk').value  = '50000';
+  document.getElementById('inp-est-chunks').value = '—';
+  updateSubmitBtn();
+}
+
+// ── Toasts ────────────────────────────────────────────────────────────────
+function toast(type, title, msg, duration = 4000) {
+  const icons = { success:'✅', error:'❌', info:'ℹ️', warning:'⚠️' };
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = `
+    <div class="toast-icon">${icons[type]||'ℹ️'}</div>
+    <div class="toast-body">
+      <div class="toast-title">${title}</div>
+      <div class="toast-msg">${msg}</div>
+    </div>`;
+  document.getElementById('toast-container').prepend(el);
+  setTimeout(() => {
+    el.classList.add('removing');
+    setTimeout(() => el.remove(), 200);
+  }, duration);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function shortId(id) { return id ? id.slice(0, 8) + '…' : '—'; }
+function fmtNum(n) {
+  if (n == null) return '—';
+  const num = parseFloat(n);
+  if (Number.isInteger(num)) return num.toLocaleString();
+  return num.toLocaleString(undefined, { maximumFractionDigits: 6 });
+}
+function timeAgo(iso) {
+  const d = Math.round((Date.now() - new Date(iso)) / 1000);
+  if (d < 60)   return `${d}s ago`;
+  if (d < 3600) return `${Math.round(d/60)}m ago`;
+  return `${Math.round(d/3600)}h ago`;
+}
+</script>
+</body>
+</html>
