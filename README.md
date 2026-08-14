@@ -1,8 +1,8 @@
 # Distributed File Processing System
 
-A distributed file processing API built with Ray, FastAPI, and Redis. Accepts CSV or JSON uploads, splits them into configurable chunks, processes each chunk in parallel across Ray workers, and returns aggregated results via a REST API. Job progress and results are tracked in Redis with real-time status polling.
+> **Split. Dispatch. Execute. Aggregate.**
 
----
+A distributed file processing control plane built with Ray, FastAPI, and Redis. Accepts CSV or JSON uploads, splits them into configurable chunks, processes each chunk in parallel across Ray workers, and returns aggregated results. A dark, observability-style web UI — served directly by FastAPI — shows live cluster telemetry, per-chunk task traces, event logs, benchmark comparisons, and fault-injection demos, all rendered from real backend state (no fake metrics).
 
 ## Table of Contents
 
@@ -25,25 +25,32 @@ A distributed file processing API built with Ray, FastAPI, and Redis. Accepts CS
 ## Architecture
 
 ```text
-Client
-  |
-  v
+Control plane UI (vanilla SPA, served by FastAPI at /)
+   |
+   v
 FastAPI  (port 8000)
-  |
-  |-- POST /api/v1/upload          Store file, create job record in Redis
-  |-- POST /api/v1/process/{id}    Dispatch background orchestration task
-  |-- GET  /api/v1/status/{id}     Poll progress (0-100%) from Redis
-  |-- GET  /api/v1/result/{id}     Retrieve aggregated result from Redis
-  |
-  v
+   |
+   |-- POST /api/v1/upload           Store file, create job record in Redis
+   |-- POST /api/v1/inspect          Preview a file before submitting
+   |-- POST /api/v1/process/{id}     Dispatch background orchestration task
+   |-- GET  /api/v1/status/{id}      Poll progress (0-100%) from Redis
+   |-- GET  /api/v1/result/{id}      Retrieve aggregated result from Redis
+   |-- GET  /api/v1/jobs             Job history + filters
+   |-- GET  /api/v1/jobs/{id}        Job detail: tasks + event log
+   |-- GET  /api/v1/system           Cluster + task telemetry
+   |-- POST /api/v1/benchmark        Real sequential-vs-distributed benchmark
+   |-- POST /api/v1/demo/fault       Gated worker-failure demo (DEMO_MODE)
+   |
+   v
 Orchestrator (background task)
-  |
-  |-- ChunkerService               Split file into N row-bounded CSV chunks
-  |-- Ray remote tasks (parallel)  process_chunk() runs on each chunk
-  |-- ResultAggregator (actor)     Collects partial results, computes final value
-  |
-  v
-Redis (port 6379)                  Job metadata, chunk lists, results (24 h TTL)
+   |
+   |-- ChunkerService               Split file into N row-bounded CSV chunks
+   |-- Ray remote tasks (parallel)  process_chunk() runs on each chunk
+   |-- ResultAggregator (actor)     Collects partial results, computes final value
+   |
+   v
+Redis (port 6379)                  Job metadata, chunk lists, results (24 h TTL),
+                                   job index, task records, event log, benchmarks
 Ray Head (port 8265 dashboard, 10001 client)
 Ray Workers (2 replicas by default)
 Local filesystem / S3 (configurable)
@@ -51,15 +58,15 @@ Local filesystem / S3 (configurable)
 
 ### Processing flow for a single job
 
-1. Client uploads a file with an operation (`sum`, `mean`, or `filter`) and a target column.
-2. The file is saved to local storage (or S3). A UUID job ID is returned immediately.
-3. Client calls `POST /process/{job_id}`. The orchestrator runs as a FastAPI background task.
+1. The UI (or a client) uploads a file with an operation (`sum`, `mean`, or `filter`) and a target column.
+2. The file is saved to local storage (or S3). A UUID job ID is returned immediately and indexed in Redis.
+3. Processing is triggered from the wizard (or via `POST /process/{job_id}`). The orchestrator runs as a FastAPI background task.
 4. The file is split into equal-sized chunks (default 50 000 rows each).
-5. One Ray remote task is dispatched per chunk. All tasks run in parallel.
+5. One Ray remote task is dispatched per chunk, subject to a `MAX_CONCURRENT_TASKS` concurrency window. Each dispatch writes a task record and an event to Redis.
 6. As each task completes, `ray.wait()` collects the result and forwards it to the `ResultAggregator` actor.
-7. Redis is updated with the progress percentage after each completed chunk.
+7. Redis is updated with the progress percentage after each completed chunk; the event log records dispatch, completion, retry, and failure events.
 8. Once all chunks are done, the aggregator returns the final value and the job status is set to `completed`.
-9. Client polls `/status/{job_id}` and fetches `/result/{job_id}` when complete.
+9. The UI polls `/status/{job_id}` while the job is live and renders the task table, event log, and worker map from `/jobs/{job_id}` when it settles.
 
 ---
 
@@ -71,10 +78,11 @@ Local filesystem / S3 (configurable)
 | Distributed compute | Ray 2.9.2 (remote functions + actor model) |
 | Job state / caching | Redis 7 |
 | Data processing | Pandas 2.2 |
+| Web UI | Vanilla JS (ES modules) + CSS, no build step — served by FastAPI `/static` |
 | Containerisation | Docker, Docker Compose |
 | Data validation | Pydantic v2, pydantic-settings |
 | Cloud storage | boto3 (S3 backend — local filesystem default) |
-| Testing | pytest 7.4, pytest-asyncio, httpx |
+| Testing | pytest 7.4, pytest-asyncio, httpx; `node --test` for UI pure logic |
 
 ---
 
@@ -106,10 +114,27 @@ JSON files are normalised to CSV chunks internally so the same `process_chunk` f
 
 ```text
 uploaded -> processing -> completed
-                      \-> failed
+                       \-> failed
 ```
 
 Status and progress (0 to 100 %) are polled from `GET /status/{job_id}`. Results persist in Redis for 24 hours after completion.
+
+### Control plane UI
+
+The SPA (served at `/`, no build step) renders everything from live API state:
+
+| View | Shows |
+| --- | --- |
+| Overview | Cluster health, live pipeline graph, recent jobs, worker fleet, task telemetry |
+| New job | 4-step wizard with instant file inspection, demo fault-injection toggle (when enabled) |
+| Job | Live progress, per-chunk task table, event log, worker activity map, result banner |
+| History | Full job index with status / operation / search filters |
+| Cluster | Ray node cards, resource allocation, local-mode indicator |
+| Benchmark | Real sequential-vs-distributed runs with verified-equal results |
+| Architecture | System design overview |
+| Settings | Client-side poll intervals + API base URL |
+
+The execution graph uses real task counters; the demo fault path shows a chunk fail → retry → recover sequence end to end. Users with `prefers-reduced-motion` get a static graph, and color is never the only signal.
 
 ---
 
@@ -125,28 +150,51 @@ distributed-file-processor/
 |   |   `-- job.py               Pydantic request/response models and status enums
 |   |-- api/
 |   |   `-- v1/
-|   |       |-- router.py        Mounts upload, process, status, result routers
+|   |       |-- router.py        Mounts upload, process, status, result, system, jobs,
+|   |       |                    benchmark, demo routers
 |   |       `-- endpoints/
-|   |           |-- upload.py    File ingestion: validation, chunking estimate, Redis write
+|   |           |-- upload.py    File ingestion: validation, inspection, indexing, demo chunks
 |   |           |-- process.py   Triggers background orchestration task
 |   |           |-- status.py    Returns current job status and progress
-|   |           `-- result.py    Returns final aggregated result
+|   |           |-- result.py    Returns final aggregated result
+|   |           |-- system.py    Cluster + Redis + task telemetry
+|   |           |-- jobs.py      Job index and detail (tasks + events)
+|   |           |-- benchmark.py Sequential vs distributed benchmark
+|   |           `-- demo.py      Gated fault-injection upload
 |   |-- services/
 |   |   |-- storage.py           Local filesystem storage (S3 interface ready)
-|   |   |-- chunker.py           CSV and JSON splitting into row-bounded chunks
-|   |   |-- ray_tasks.py         Ray remote function: sum / mean / filter per chunk
+|   |   |-- chunker.py           CSV and JSON splitting + file inspection
+|   |   |-- ray_tasks.py         Ray remote functions: sum / mean / filter, tracked + faulty variants
 |   |   |-- ray_actor.py         Ray actor: collects partials, returns final value
-|   |   `-- orchestrator.py      Job flow: chunk -> dispatch -> collect -> aggregate
+|   |   |-- orchestrator.py      Job flow: chunk -> dispatch -> collect -> aggregate, event log
+|   |   `-- benchmark.py         Benchmark data generation + sequential/distributed runs
 |   `-- utils/
-|       |-- redis_client.py      Redis wrapper with atomic progress update (WATCH/MULTI/EXEC)
+|       |-- redis_client.py      Redis wrapper: metadata, atomic progress, job index,
+|       |                        task records, event log, benchmarks
 |       `-- logger.py            Shared logger factory (no duplicate handlers)
-|
+
+|-- frontend/
+|   |-- index.html               SPA shell (hash router)
+|   |-- styles.css               Dark technical design system
+|   `-- js/
+|       |-- main.js              Router + shell
+|       |-- store.js             Central state + route-aware polling
+|       |-- api.js               API client
+|       |-- format.js            Pure formatting helpers
+|       |-- model.js             Pure state normalisation helpers
+|       |-- dom.js / icons.js / components.js / execgraph.js
+|       `-- views/               overview, newjob, job, history, cluster,
+|                                benchmark, architecture, settings
+
 |-- tests/
 |   |-- conftest.py              Session-scoped Ray fixture, CSV/JSON byte fixtures
 |   |-- test_api.py              API smoke tests (no external dependencies)
 |   |-- test_chunker.py          ChunkerService unit tests for CSV and JSON formats
 |   |-- test_ray_tasks.py        process_chunk unit tests: all operations and error paths
-|   `-- test_integration.py      Full pipeline: upload -> process -> poll -> result
+|   |-- test_integration.py      Full pipeline: upload -> process -> poll -> result
+|   `-- test_observability.py    System telemetry, job index/detail, inspect, benchmark, demo fault
+
+|-- tests-js/                    UI pure-logic tests (node --test) for format.js / model.js
 |
 |-- scripts/
 |   |-- generate_test_data.py    Generates large CSV files for load testing
@@ -193,7 +241,7 @@ Wait for all health checks to pass (approximately 30 seconds). All three service
 
 | Service | URL |
 | --- | --- |
-| REST API | <http://localhost:8000> |
+| Control plane UI | <http://localhost:8000> |
 | Interactive API docs (Swagger UI) | <http://localhost:8000/docs> |
 | Ray Dashboard | <http://localhost:8265> |
 | Redis (host-mapped) | localhost:6380 |
@@ -253,6 +301,8 @@ All settings are loaded from environment variables or a `.env` file in the proje
 | `S3_BUCKET_NAME` | unset | S3 bucket name |
 | `S3_REGION` | `us-east-1` | S3 region |
 | `LOG_LEVEL` | `INFO` | Python logging level |
+| `DEMO_MODE` | `false` | When `true`, enables the `/api/v1/demo/fault` endpoint and the fault-injection toggle in the UI wizard |
+| `MAX_BENCHMARK_ROWS` | `2000000` | Upper bound for the `/api/v1/benchmark` row count |
 
 ---
 
@@ -296,6 +346,73 @@ Response `201 Created`:
 ```
 
 Error responses: `400` invalid parameters, `413` file exceeds size limit, `415` unsupported content type.
+
+---
+
+### Inspect file (preview)
+
+```http
+POST /api/v1/inspect
+Content-Type: multipart/form-data
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `file` | binary | yes | CSV or JSON file |
+| `chunk_size_rows` | integer | no (default 50000) | Used for the chunk estimate |
+
+Returns row count, column names, a sample, and the estimated chunk count — used by the wizard for instant feedback.
+
+---
+
+### Job history
+
+```http
+GET /api/v1/jobs?status=&operation=&search=&limit=&offset=
+```
+
+All query params are optional filters. Returns `{ "jobs": [JobSummary...], "total": n }`.
+
+```http
+GET /api/v1/jobs/{job_id}
+```
+
+Returns the full job detail: summary, per-chunk `tasks` (status, worker, duration, attempts), and the `events` log (dispatch / complete / retry / fail / recover / result).
+
+---
+
+### System telemetry
+
+```http
+GET /api/v1/system
+```
+
+Returns `ray_initialized`, node list with resources, CPU/memory totals, local-mode flag, Redis connectivity, and live job/task counters (`active_jobs`, `completed_tasks`, `failed_tasks`, `total_retries`, `avg_duration_ms`, `throughput_per_sec`).
+
+---
+
+### Benchmark
+
+```http
+POST /api/v1/benchmark?rows=200000&chunk_size=50000&operation=sum
+```
+
+Generates deterministic data (seed 42), processes it sequentially and via the same Ray chunk pipeline, and stores the measured wall-clock times. Returns `202` with a `benchmark_id`; poll:
+
+```http
+GET /api/v1/benchmark/{benchmark_id}
+GET /api/v1/benchmark            # list history
+```
+
+---
+
+### Demo fault injection (DEMO_MODE only)
+
+```http
+POST /api/v1/demo/fault
+```
+
+Same contract as `/upload` plus `fail_chunks` (comma-separated chunk indices to fail). The orchestrator records the failure, retries the chunk up to 3 times, and recovers — visible live in the UI. Returns `403` when `DEMO_MODE` is disabled.
 
 ---
 
@@ -382,8 +499,17 @@ Ray initialises in local mode automatically. No separate Ray cluster is needed f
 | `test_chunker.py` | CSV and JSON chunking logic | None |
 | `test_ray_tasks.py` | process_chunk for all operations and error paths | Ray local mode |
 | `test_integration.py` | Full pipeline: upload -> process -> poll -> result | Ray local mode, Redis |
+| `test_observability.py` | System telemetry, job index/detail, inspect, benchmark, demo fault | Ray local mode, Redis |
 
-CI runs the full 37-test suite on Python 3.11 with a Redis service container, followed by a Docker image build and standalone API smoke test. See `.github/workflows/ci.yml`.
+### UI pure-logic tests
+
+```bash
+node --test tests-js/
+```
+
+Covers the shared formatting and state-normalisation helpers (`frontend/js/format.js`, `frontend/js/model.js`) that both the browser and the tests import — no DOM, no browser required.
+
+CI runs the full pytest suite on Python 3.11 with a Redis service container, followed by a Docker image build and standalone API smoke test. See `.github/workflows/ci.yml`.
 
 ---
 
@@ -421,6 +547,10 @@ RAY_ADDRESS=ray://<head-node-ip>:10001
 ---
 
 ## Monitoring
+
+### Control plane UI
+
+The web UI is the primary monitoring surface: Overview (cluster + task telemetry), Cluster (Ray node cards), and per-job views with task tables and event logs.
 
 ### Ray Dashboard
 
