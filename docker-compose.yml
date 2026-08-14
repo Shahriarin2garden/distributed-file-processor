@@ -12,7 +12,10 @@ services:
     ports:
       - "8265:8265"   # Ray dashboard
       - "10001:10001" # Ray client connections
+    environment:
+      - PYTHONPATH=/opt/dfp
     volumes:
+      - ./app:/opt/dfp/app
       - ./storage:/storage
     networks:
       - ray-net
@@ -26,12 +29,16 @@ services:
   # ── Ray workers ──────────────────────────────────────────────────────────
   ray-worker:
     image: rayproject/ray:2.9.2-py311
-    # Workers connect to head GCS port (6379 inside ray-head container)
+    # Workers connect to head GCS port (6379 inside ray-head container).
+    # ./app is mounted so remote task modules are importable on the workers.
     command: ray start --address='ray-head:6379' --num-cpus 2 --block
     depends_on:
       ray-head:
         condition: service_healthy
+    environment:
+      - PYTHONPATH=/opt/dfp
     volumes:
+      - ./app:/opt/dfp/app
       - ./storage:/storage
     networks:
       - ray-net
