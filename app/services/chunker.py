@@ -35,6 +35,43 @@ class ChunkerService:
                 chunk_id += 1
         return chunk_paths
 
+    def inspect_csv(self, file_path: str, chunk_size: int, sample_rows: int = 8) -> dict:
+        """Return {row_count, columns, sample, estimated_chunks} in a single pass."""
+        columns: list[str] = []
+        sample: list[dict] = []
+        total_rows = 0
+        try:
+            reader = pd.read_csv(
+                file_path, chunksize=chunk_size, low_memory=False, encoding="utf-8"
+            )
+            for chunk_df in reader:
+                if not columns:
+                    columns = list(chunk_df.columns)
+                total_rows += len(chunk_df)
+                if len(sample) < sample_rows:
+                    sample.extend(chunk_df.head(sample_rows - len(sample)).to_dict("records"))
+        except UnicodeDecodeError:
+            reader = pd.read_csv(
+                file_path, chunksize=chunk_size, low_memory=False, encoding="latin-1"
+            )
+            for chunk_df in reader:
+                if not columns:
+                    columns = list(chunk_df.columns)
+                total_rows += len(chunk_df)
+                if len(sample) < sample_rows:
+                    sample.extend(chunk_df.head(sample_rows - len(sample)).to_dict("records"))
+        except Exception:
+            logger.exception(f"Error inspecting CSV {file_path}")
+            return {"row_count": None, "columns": [], "sample": [], "estimated_chunks": 1}
+
+        estimated = max((total_rows + chunk_size - 1) // chunk_size, 1) if total_rows else 1
+        return {
+            "row_count": total_rows,
+            "columns": columns,
+            "sample": sample[:sample_rows],
+            "estimated_chunks": estimated,
+        }
+
     def estimate_chunks(self, file_path: str, chunk_size: int) -> int:
         try:
             with open(file_path, encoding="utf-8", errors="replace") as fh:
@@ -61,6 +98,23 @@ class ChunkerService:
             chunk_paths.append(chunk_path)
             logger.info(f"JSON chunk {chunk_id}: {len(chunk)} records → {chunk_path}")
         return chunk_paths
+
+    def inspect_json(self, file_path: str, chunk_size: int, sample_rows: int = 8) -> dict:
+        try:
+            records = self._load_json_records(file_path)
+        except Exception:
+            logger.exception(f"Error inspecting JSON {file_path}")
+            return {"row_count": None, "columns": [], "sample": [], "estimated_chunks": 1}
+        if not records:
+            return {"row_count": 0, "columns": [], "sample": [], "estimated_chunks": 1}
+        columns = sorted({k for rec in records[:200] for k in (rec.keys() if isinstance(rec, dict) else [])})
+        estimated = max((len(records) + chunk_size - 1) // chunk_size, 1)
+        return {
+            "row_count": len(records),
+            "columns": columns,
+            "sample": records[:sample_rows],
+            "estimated_chunks": estimated,
+        }
 
     def estimate_json_chunks(self, file_path: str, chunk_size: int) -> int:
         try:

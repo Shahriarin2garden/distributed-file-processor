@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     api_key_secret: Optional[str] = None  # if set, X-API-Key header required
     max_file_size_mb: int = 500          # reject uploads larger than this
 
+    # Fault-injection demo (dev/demo environments only). When enabled, the
+    # /api/v1/upload endpoint accepts demo_fail_chunks to simulate worker
+    # failures so the fault-tolerance path can be observed. Disabled by default.
+    demo_mode: bool = False
+
+    # Benchmark limits — keep benchmark runs bounded so the API stays responsive.
+    max_benchmark_rows: int = 2_000_000
+
     log_level: str = "INFO"
 
     class Config:
