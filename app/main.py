@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.v1.router import api_router
 from app.config import settings
 from app.utils.logger import setup_logger
+from app.utils.redis_client import redis_client
 
 _FRONTEND = Path(__file__).parent.parent / "frontend"
 
@@ -88,4 +89,15 @@ if _FRONTEND.exists():
 
 @app.get("/health", tags=["health"])
 async def health_check():
-    return {"status": "healthy", "ray_initialized": ray.is_initialized()}
+    redis_ok = False
+    try:
+        redis_ok = redis_client.client.ping()
+    except Exception:
+        pass
+    return {
+        "status": "healthy",
+        "ray_initialized": ray.is_initialized(),
+        "redis_connected": redis_ok,
+        "version": "1.0.0",
+        "demo_mode": settings.demo_mode,
+    }
