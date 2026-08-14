@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* ── Japanese Washi Palette ──────────────────────────────── */
+  --color-background: #FAFAF8;    /* warm off-white — washi paper */
+  --color-foreground: #1C1C1E;    /* ink black */
+  --color-primary:    #6B7B6E;    /* muted sage green */
+  --color-on-primary: #FFFFFF;
+  --color-secondary:  #8A9A8D;    /* lighter sage */
+  --color-accent:     #6B7B6E;
+  --color-surface:    #FFFFFF;
+  --color-muted:      #F0EFEC;    /* barely-there gray */
+  --color-border:     #E5E4E0;    /* hairline border */
+  --color-destructive:#B45309;    /* warm amber-rust for errors */
+  --color-ring:       #6B7B6E;
+
+  /* ── Fonts ──────────────────────────────────────────────── */
+  --font-sans:  var(--font-noto-sans-jp),  ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-noto-serif-jp), ui-serif, Georgia, serif;
+  --font-mono:  var(--font-fira-code),     ui-monospace, monospace;
+}
+
+/* ── Base ─────────────────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Ma — meaningful whitespace ─────────────────────────── */
+.section-ma {
+  padding-top: 7rem;
+  padding-bottom: 7rem;
+}
+
+/* ── Typography helpers ──────────────────────────────────── */
+.display-heading {
+  font-family: var(--font-serif);
+  font-weight: 300;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.label-meta {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;        /* 11px */
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+/* ── Hairline border ─────────────────────────────────────── */
+.hairline {
+  border-color: var(--color-border);
+}
+
+/* ── Sage gradient text ──────────────────────────────────── */
+.sage-text {
+  color: var(--color-primary);
+}
+
+/* ── Card hover — gentle lift ───────────────────────────── */
+.card-lift {
+  transition: transform 250ms cubic-bezier(0.16,1,0.3,1),
+              box-shadow 250ms cubic-bezier(0.16,1,0.3,1);
+}
+.card-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.07);
+}
+
+/* ── Animated data-flow dots (SVG) ──────────────────────── */
+@keyframes flow-along {
+  0%   { offset-distance: 0%;   opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+
+.flow-dot {
+  animation: flow-along 3s linear infinite;
+  offset-rotate: auto;
+}
+
+/* ── Step card expand ───────────────────────────────────── */
+.step-card-active {
+  background-color: #FFFFFF;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+}
+
+/* ── Node pulse ─────────────────────────────────────────── */
+@keyframes node-pulse {
+  0%, 100% { r: 6; opacity: 0.7; }
+  50%       { r: 9; opacity: 1;   }
+}
+
+@keyframes data-travel {
+  0%   { stroke-dashoffset: 200; opacity: 0.2; }
+  50%  { opacity: 0.8; }
+  100% { stroke-dashoffset: 0;   opacity: 0.2; }
+}
+
+/* ── Scroll fade-in ─────────────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+.fade-up {
+  animation: fade-up 0.6s cubic-bezier(0.16,1,0.3,1) both;
+}
+
+/* ── Respect reduced-motion ─────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

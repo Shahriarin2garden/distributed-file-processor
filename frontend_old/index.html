@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Distributed File Processor — Ray · FastAPI · Redis</title>
+<style>
+/* ── Reset ───────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;font-size:16px}
+img,svg{display:block}
+button,input,select{font:inherit}
+
+/* ── Design tokens ───────────────────────────────────────────────────── */
+:root{
+  --ink:   #05050a;
+  --ink2:  #0c0d18;
+  --ink3:  #111422;
+  --ink4:  #181c2e;
+  --glass: rgba(255,255,255,.028);
+  --glassH:rgba(255,255,255,.055);
+  --rim:   rgba(255,255,255,.07);
+  --rimH:  rgba(255,255,255,.14);
+  --blue:  #3b82f6;
+  --blue2: #2563eb;
+  --cyan:  #06b6d4;
+  --violet:#8b5cf6;
+  --green: #10b981;
+  --amber: #f59e0b;
+  --red:   #f43f5e;
+  --white: #f8fafc;
+  --slate: #94a3b8;
+  --slate2:#475569;
+  --r:     16px;
+  --r-sm:  10px;
+  --r-xs:  6px;
+  --sh:    0 8px 40px rgba(0,0,0,.7);
+  --sh-sm: 0 4px 20px rgba(0,0,0,.5);
+  --dur:   .22s;
+  --ease:  cubic-bezier(.4,0,.2,1);
+}
+
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  background:var(--ink);
+  color:var(--white);
+  line-height:1.6;
+  overflow-x:hidden;
+}
+
+/* ── Utility ─────────────────────────────────────────────────────────── */
+.container{max-width:1180px;margin:0 auto;padding:0 28px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+
+/* ── Typography ──────────────────────────────────────────────────────── */
+.display{
+  font-size:clamp(2.6rem,6vw,5rem);
+  font-weight:800;
+  letter-spacing:-.04em;
+  line-height:1.08;
+}
+.headline{
+  font-size:clamp(1.5rem,3vw,2.4rem);
+  font-weight:700;
+  letter-spacing:-.03em;
+  line-height:1.2;
+}
+.label{
+  font-size:.7rem;font-weight:700;
+  letter-spacing:.1em;text-transform:uppercase;
+  color:var(--slate);
+}
+
+/* ── Gradient text ───────────────────────────────────────────────────── */
+.grad{
+  background:linear-gradient(135deg,var(--white) 0%,#c7d2fe 40%,var(--cyan) 100%);
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.grad-blue{
+  background:linear-gradient(135deg,var(--blue),var(--cyan));
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:10px 22px;border-radius:var(--r-sm);
+  font-size:.88rem;font-weight:600;cursor:pointer;
+  border:none;font-family:inherit;
+  transition:transform var(--dur) var(--ease),box-shadow var(--dur) var(--ease),background var(--dur);
+  white-space:nowrap;text-decoration:none;
+}
+.btn:hover:not(:disabled){transform:translateY(-2px)}
+.btn:active:not(:disabled){transform:translateY(0)}
+
+.btn-primary{
+  background:linear-gradient(135deg,var(--blue),var(--blue2));
+  color:#fff;
+  box-shadow:0 4px 18px rgba(59,130,246,.4);
+}
+.btn-primary:hover:not(:disabled){box-shadow:0 8px 28px rgba(59,130,246,.55)}
+
+.btn-ghost{
+  background:var(--glass);
+  border:1px solid var(--rim);
+  color:var(--white);
+  backdrop-filter:blur(8px);
+}
+.btn-ghost:hover{background:var(--glassH);border-color:var(--rimH)}
+
+.btn-sm{padding:7px 16px;font-size:.78rem}
+.btn-xs{padding:4px 10px;font-size:.72rem}
+.btn-danger{background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.25);color:var(--red)}
+.btn-danger:hover{background:rgba(244,63,94,.2)}
+.btn-wide{width:100%;justify-content:center;padding:13px}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  HEADER                                                                */
+/* ────────────────────────────────────────────────────────────────────── */
+#header{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  padding:14px 0;
+  border-bottom:1px solid rgba(255,255,255,.0);
+  transition:background .3s,border-color .3s,backdrop-filter .3s;
+}
+#header.scrolled{
+  background:rgba(5,5,10,.8);
+  backdrop-filter:blur(20px);
+  border-color:var(--rim);
+}
+.nav{
+  display:flex;align-items:center;justify-content:space-between;gap:24px;
+}
+.nav-brand{display:flex;align-items:center;gap:12px;text-decoration:none}
+.nav-icon{
+  width:38px;height:38px;
+  background:linear-gradient(135deg,var(--blue),var(--violet));
+  border-radius:10px;
+  display:grid;place-items:center;
+  font-size:18px;
+  box-shadow:0 0 20px rgba(59,130,246,.35);
+  flex-shrink:0;
+}
+.nav-title{font-size:1rem;font-weight:700;color:var(--white);letter-spacing:-.02em}
+.nav-links{
+  display:flex;align-items:center;gap:6px;
+  list-style:none;
+}
+.nav-links a{
+  padding:6px 14px;border-radius:var(--r-xs);
+  font-size:.85rem;color:var(--slate);text-decoration:none;
+  transition:color var(--dur),background var(--dur);
+}
+.nav-links a:hover{color:var(--white);background:var(--glass)}
+.nav-right{display:flex;align-items:center;gap:10px}
+
+.status-pill{
+  display:flex;align-items:center;gap:7px;
+  padding:5px 13px;border-radius:999px;
+  border:1px solid var(--rim);
+  background:var(--glass);
+  font-size:.73rem;font-weight:500;
+  backdrop-filter:blur(8px);
+}
+.dot{
+  width:7px;height:7px;border-radius:50%;
+  background:var(--slate2);
+  transition:background .4s,box-shadow .4s;
+  flex-shrink:0;
+}
+.dot.on  {background:var(--green);box-shadow:0 0 8px var(--green)}
+.dot.off {background:var(--red);  box-shadow:0 0 8px var(--red)}
+.dot.warn{background:var(--amber);box-shadow:0 0 8px var(--amber);animation:blink 1.6s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+
+@media(max-width:700px){.nav-links,.nav-right .btn-ghost{display:none}}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  HERO                                                                  */
+/* ────────────────────────────────────────────────────────────────────── */
+#hero{
+  min-height:100vh;
+  display:flex;align-items:center;
+  padding:120px 0 80px;
+  position:relative;
+  overflow:hidden;
+}
+
+/* Aurora orbs */
+.aurora{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.orb{
+  position:absolute;border-radius:50%;
+  filter:blur(100px);
+  animation:drift 14s ease-in-out infinite;
+}
+.orb-1{width:700px;height:700px;top:-200px;left:-150px;
+        background:radial-gradient(circle,rgba(99,102,241,.45),transparent 70%);
+        animation-duration:18s}
+.orb-2{width:550px;height:550px;top:0;right:-100px;
+        background:radial-gradient(circle,rgba(59,130,246,.35),transparent 70%);
+        animation-delay:-6s;animation-duration:14s}
+.orb-3{width:450px;height:450px;bottom:-100px;left:35%;
+        background:radial-gradient(circle,rgba(16,185,129,.25),transparent 70%);
+        animation-delay:-10s;animation-duration:20s}
+.orb-4{width:300px;height:300px;top:40%;right:15%;
+        background:radial-gradient(circle,rgba(139,92,246,.3),transparent 70%);
+        animation-delay:-3s;animation-duration:12s}
+
+@keyframes drift{
+  0%,100%{transform:translate(0,0)   scale(1)}
+  25%    {transform:translate(30px,-25px) scale(1.06)}
+  50%    {transform:translate(-20px, 35px) scale(.94)}
+  75%    {transform:translate(25px,  20px) scale(1.03)}
+}
+
+/* Grid noise overlay */
+.hero-grid{
+  position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(ellipse 80% 80% at 50% 0%,black 30%,transparent 100%);
+}
+
+.hero-inner{
+  position:relative;z-index:1;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:64px;
+  align-items:center;
+}
+@media(max-width:860px){
+  .hero-inner{grid-template-columns:1fr;text-align:center}
+  .hero-ctas{justify-content:center}
+}
+
+.hero-eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:5px 14px;border-radius:999px;
+  border:1px solid rgba(59,130,246,.3);
+  background:rgba(59,130,246,.08);
+  font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--blue);margin-bottom:20px;
+}
+.hero-eyebrow span{width:6px;height:6px;border-radius:50%;background:var(--blue);box-shadow:0 0 6px var(--blue)}
+
+.hero-heading{margin-bottom:24px}
+.hero-sub{
+  font-size:1.05rem;color:var(--slate);
+  line-height:1.75;max-width:460px;
+  margin-bottom:36px;
+}
+.hero-ctas{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+
+/* Typewriter */
+.typewriter{
+  display:inline-block;
+  border-right:3px solid var(--cyan);
+  padding-right:4px;
+  animation:cursor .8s step-end infinite;
+  min-width:2ch;
+}
+@keyframes cursor{0%,100%{border-color:var(--cyan)}50%{border-color:transparent}}
+
+/* Hero badge strip */
+.hero-badges{
+  display:flex;align-items:center;gap:16px;
+  margin-top:40px;flex-wrap:wrap;
+}
+.hero-badge{
+  display:flex;align-items:center;gap:6px;
+  font-size:.76rem;color:var(--slate);
+}
+.hero-badge svg{color:var(--green);flex-shrink:0}
+
+/* ── 3D floating card ─────────────────────────────────────────────────── */
+.hero-visual{position:relative;perspective:1000px}
+.card-3d{
+  transform-style:preserve-3d;
+  transition:transform .4s cubic-bezier(.2,.8,.2,1);
+  border-radius:var(--r);
+  will-change:transform;
+}
+.terminal{
+  background:var(--ink2);
+  border:1px solid var(--rim);
+  border-radius:var(--r);
+  overflow:hidden;
+  box-shadow:var(--sh),0 0 60px rgba(59,130,246,.12);
+}
+.term-bar{
+  display:flex;align-items:center;gap:8px;
+  padding:12px 16px;
+  background:var(--ink3);
+  border-bottom:1px solid var(--rim);
+}
+.term-dot{width:11px;height:11px;border-radius:50%}
+.term-dot.r{background:#ff5f57}.term-dot.y{background:#febc2e}.term-dot.g{background:#28c840}
+.term-title{flex:1;text-align:center;font-size:.72rem;color:var(--slate2)}
+.term-body{padding:18px 20px;font-family:"Fira Code","Cascadia Code",monospace;font-size:.78rem;line-height:1.9}
+.t-dim {color:var(--slate2)}
+.t-key {color:#7dd3fc}
+.t-val {color:#86efac}
+.t-op  {color:#c4b5fd}
+.t-prog{color:var(--amber)}
+.t-done{color:var(--green)}
+.t-err {color:var(--red)}
+
+/* Progress track in terminal */
+.term-progress{
+  margin:12px 0;
+  background:rgba(255,255,255,.08);
+  border-radius:999px;height:5px;overflow:hidden;
+}
+.term-progress-bar{
+  height:100%;
+  background:linear-gradient(90deg,var(--blue),var(--cyan));
+  border-radius:999px;
+  box-shadow:0 0 10px rgba(59,130,246,.6);
+  animation:termProg 3s ease-in-out infinite;
+}
+@keyframes termProg{0%{width:20%}60%{width:85%}100%{width:85%}}
+
+/* Floating badges */
+.float-badge{
+  position:absolute;
+  background:var(--ink3);
+  border:1px solid var(--rim);
+  border-radius:var(--r-sm);
+  padding:10px 14px;
+  display:flex;align-items:center;gap:9px;
+  font-size:.76rem;font-weight:600;
+  box-shadow:var(--sh-sm);
+  animation:float 5s ease-in-out infinite;
+  backdrop-filter:blur(12px);
+}
+.float-badge-icon{font-size:1.1rem}
+.float-badge-val{font-size:1rem;font-weight:800;color:var(--white)}
+.float-badge-lbl{font-size:.65rem;color:var(--slate);display:block;font-weight:500}
+
+.fb-1{top:-18px;right:-18px;animation-delay:0s}
+.fb-2{bottom:-18px;left:-18px;animation-delay:-2s}
+.fb-3{top:50%;left:-90px;transform:translateY(-50%);animation-delay:-3.5s}
+
+@keyframes float{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-8px)}
+}
+.fb-3{animation:float3 5.5s ease-in-out infinite}
+@keyframes float3{
+  0%,100%{transform:translateY(-50%)}
+  50%{transform:translateY(calc(-50% - 8px))}
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  STATS BAR                                                             */
+/* ────────────────────────────────────────────────────────────────────── */
+#stats{
+  padding:40px 0;
+  border-top:1px solid var(--rim);
+  border-bottom:1px solid var(--rim);
+  background:var(--glass);
+  backdrop-filter:blur(8px);
+}
+.stats-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:24px;
+}
+@media(max-width:640px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
+.stat-item{text-align:center}
+.stat-num{
+  font-size:2.2rem;font-weight:800;letter-spacing:-.04em;
+  background:linear-gradient(135deg,var(--white),var(--cyan));
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.stat-lbl{font-size:.75rem;color:var(--slate);margin-top:4px}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  APP SECTION                                                           */
+/* ────────────────────────────────────────────────────────────────────── */
+#app{padding:100px 0}
+
+.section-label{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:5px 12px;border-radius:999px;
+  background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);
+  font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--blue);margin-bottom:14px;
+}
+.section-head{margin-bottom:12px}
+.section-sub{color:var(--slate);font-size:.95rem;max-width:520px;margin-bottom:48px}
+
+.app-grid{
+  display:grid;
+  grid-template-columns:400px 1fr;
+  gap:24px;align-items:start;
+}
+@media(max-width:900px){.app-grid{grid-template-columns:1fr}}
+
+/* ── Card ──────────────────────────────────────────────────────────── */
+.card{
+  background:var(--glass);
+  border:1px solid var(--rim);
+  border-radius:var(--r);
+  backdrop-filter:blur(14px);
+  box-shadow:var(--sh);
+  overflow:hidden;
+  transition:border-color var(--dur),box-shadow var(--dur);
+}
+.card:hover{border-color:var(--rimH);box-shadow:var(--sh),0 0 40px rgba(59,130,246,.08)}
+.card-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 20px;
+  border-bottom:1px solid var(--rim);
+  gap:12px;
+}
+.card-title{
+  display:flex;align-items:center;gap:8px;
+  font-size:.72rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--slate);
+}
+.card-body{padding:20px}
+
+/* ── Drop zone ─────────────────────────────────────────────────────── */
+.drop{
+  border:2px dashed var(--rim);
+  border-radius:var(--r-sm);
+  padding:28px 20px;
+  text-align:center;
+  cursor:pointer;
+  position:relative;
+  transition:border-color var(--dur),background var(--dur);
+  background:rgba(255,255,255,.01);
+}
+.drop:hover,.drop.over{border-color:var(--blue);background:rgba(59,130,246,.06)}
+.drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.drop-ico{font-size:2rem;margin-bottom:8px;display:block}
+.drop h3{font-size:.9rem;font-weight:600;margin-bottom:3px}
+.drop p{font-size:.75rem;color:var(--slate)}
+
+.file-chip{
+  display:inline-flex;align-items:center;gap:8px;
+  background:var(--ink3);border:1px solid var(--rimH);
+  border-radius:999px;padding:5px 14px;
+  font-size:.75rem;margin-top:12px;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ftype{
+  padding:2px 7px;border-radius:4px;
+  font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;
+}
+.ftype.csv {background:rgba(16,185,129,.2);color:var(--green)}
+.ftype.json{background:rgba(245,158,11,.2);color:var(--amber)}
+
+/* ── Form ──────────────────────────────────────────────────────────── */
+.fg{margin-top:16px}
+.lbl{display:block;font-size:.7rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--slate);margin-bottom:7px}
+.inp{
+  width:100%;
+  background:var(--ink3);border:1px solid var(--rim);
+  border-radius:var(--r-sm);padding:9px 13px;
+  color:var(--white);font-size:.85rem;font-family:inherit;
+  outline:none;transition:border-color var(--dur),box-shadow var(--dur);
+}
+.inp:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.18)}
+.inp::placeholder{color:var(--slate2)}
+.inp[readonly]{color:var(--slate2);cursor:default}
+
+/* operation tabs */
+.op-tabs{display:flex;gap:6px}
+.op-tab{
+  flex:1;padding:8px 6px;
+  border-radius:var(--r-xs);border:1px solid var(--rim);
+  background:var(--ink3);color:var(--slate);
+  font-size:.8rem;font-weight:600;cursor:pointer;text-align:center;
+  transition:all var(--dur);font-family:inherit;
+}
+.op-tab:hover{border-color:var(--rimH);color:var(--white)}
+.op-tab.active{border-color:var(--blue);background:rgba(59,130,246,.15);color:var(--blue);box-shadow:0 0 14px rgba(59,130,246,.18)}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.hide{display:none!important}
+
+/* ── Job card ──────────────────────────────────────────────────────── */
+.job-list{display:flex;flex-direction:column;gap:10px}
+.empty{text-align:center;padding:40px 16px;color:var(--slate2);font-size:.85rem}
+.empty-ico{font-size:2rem;margin-bottom:10px;opacity:.35}
+
+.job{
+  background:var(--ink3);border:1px solid var(--rim);
+  border-radius:var(--r-sm);padding:13px 15px;
+  animation:slideIn .22s ease-out;
+  transition:border-color var(--dur);
+}
+.job:hover{border-color:var(--rimH)}
+@keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.job-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+.job-id-txt{font-size:.68rem;font-family:monospace;color:var(--slate2)}
+.jmeta{display:flex;align-items:center;gap:7px}
+.jchips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+.jchip{
+  font-size:.68rem;color:var(--slate);
+  background:var(--glass);padding:2px 8px;
+  border-radius:4px;border:1px solid var(--rim);
+  display:flex;align-items:center;gap:3px;
+}
+.jchip span{color:var(--white);font-weight:600}
+
+/* status badges */
+.sbadge{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:2px 9px;border-radius:999px;
+  font-size:.65rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+}
+.sbadge.uploaded  {background:rgba(148,163,184,.08);color:var(--slate);border:1px solid rgba(148,163,184,.15)}
+.sbadge.processing{background:rgba(59,130,246,.12);color:var(--blue);border:1px solid rgba(59,130,246,.2)}
+.sbadge.completed {background:rgba(16,185,129,.12);color:var(--green);border:1px solid rgba(16,185,129,.2)}
+.sbadge.failed    {background:rgba(244,63,94,.1);color:var(--red);border:1px solid rgba(244,63,94,.2)}
+
+/* progress bar */
+.pbar-wrap{background:rgba(255,255,255,.05);border-radius:999px;height:5px;overflow:hidden}
+.pbar{
+  height:100%;border-radius:999px;
+  background:linear-gradient(90deg,var(--blue),var(--cyan));
+  transition:width .5s cubic-bezier(.4,0,.2,1);
+  box-shadow:0 0 10px rgba(59,130,246,.5);
+  position:relative;overflow:hidden;
+}
+.pbar::after{
+  content:"";position:absolute;top:0;left:-100%;right:-100%;bottom:0;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
+  animation:shim 1.4s linear infinite;
+}
+@keyframes shim{to{transform:translateX(200%)}}
+.pbar-lbl{display:flex;justify-content:space-between;font-size:.65rem;color:var(--slate2);margin-top:5px}
+.pbar-pct{color:var(--blue);font-weight:700}
+.job-result{
+  margin-top:8px;font-size:.8rem;font-weight:700;color:var(--green);
+  display:flex;align-items:center;gap:6px;
+}
+.job-error{margin-top:7px;font-size:.73rem;color:var(--red)}
+
+/* ── Result card ───────────────────────────────────────────────────── */
+.result-display{text-align:center;padding:28px 20px}
+.res-op{font-size:.68rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate2);margin-bottom:5px}
+.res-expr{font-size:.82rem;color:var(--slate);font-family:monospace;margin-bottom:20px}
+.res-val{
+  font-size:clamp(2rem,5vw,3.5rem);
+  font-weight:800;letter-spacing:-.04em;
+  background:linear-gradient(135deg,var(--cyan),var(--blue),var(--violet));
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+  line-height:1;margin-bottom:10px;
+}
+.res-jid{font-size:.65rem;color:var(--slate2);font-family:monospace}
+
+/* ── right col stack ───────────────────────────────────────────────── */
+.right-stack{display:flex;flex-direction:column;gap:18px}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  FEATURES                                                              */
+/* ────────────────────────────────────────────────────────────────────── */
+#features{padding:100px 0;background:linear-gradient(180deg,transparent,rgba(59,130,246,.03),transparent)}
+.feat-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:18px;margin-top:56px;
+}
+@media(max-width:860px){.feat-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:540px){.feat-grid{grid-template-columns:1fr}}
+
+.feat-card{
+  background:var(--glass);border:1px solid var(--rim);
+  border-radius:var(--r);padding:26px;
+  transition:transform var(--dur) var(--ease),border-color var(--dur),box-shadow var(--dur);
+}
+.feat-card:hover{
+  transform:translateY(-4px);
+  border-color:var(--rimH);
+  box-shadow:var(--sh),0 0 30px rgba(59,130,246,.08);
+}
+.feat-icon{
+  width:44px;height:44px;border-radius:var(--r-sm);
+  display:grid;place-items:center;font-size:1.3rem;
+  margin-bottom:16px;
+}
+.feat-icon.blue  {background:rgba(59,130,246,.15);box-shadow:0 0 20px rgba(59,130,246,.15)}
+.feat-icon.cyan  {background:rgba(6,182,212,.15);box-shadow:0 0 20px rgba(6,182,212,.15)}
+.feat-icon.violet{background:rgba(139,92,246,.15);box-shadow:0 0 20px rgba(139,92,246,.15)}
+.feat-icon.green {background:rgba(16,185,129,.15);box-shadow:0 0 20px rgba(16,185,129,.15)}
+.feat-icon.amber {background:rgba(245,158,11,.15);box-shadow:0 0 20px rgba(245,158,11,.15)}
+.feat-icon.red   {background:rgba(244,63,94,.15);box-shadow:0 0 20px rgba(244,63,94,.15)}
+.feat-title{font-size:.95rem;font-weight:700;margin-bottom:8px}
+.feat-desc{font-size:.8rem;color:var(--slate);line-height:1.65}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  HOW IT WORKS                                                          */
+/* ────────────────────────────────────────────────────────────────────── */
+#how{padding:100px 0}
+.steps{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:32px;margin-top:56px;position:relative;
+}
+@media(max-width:700px){.steps{grid-template-columns:1fr}}
+
+.steps::before{
+  content:"";
+  position:absolute;
+  top:32px;left:16.66%;right:16.66%;
+  height:1px;
+  background:linear-gradient(90deg,transparent,var(--blue),var(--cyan),var(--violet),transparent);
+  opacity:.4;
+}
+@media(max-width:700px){.steps::before{display:none}}
+
+.step{text-align:center;position:relative}
+.step-num{
+  width:64px;height:64px;border-radius:50%;
+  border:1px solid var(--rim);
+  background:var(--glass);
+  display:grid;place-items:center;
+  margin:0 auto 20px;
+  font-size:1.5rem;
+  position:relative;z-index:1;
+  transition:border-color var(--dur),box-shadow var(--dur);
+}
+.step:hover .step-num{border-color:var(--blue);box-shadow:0 0 24px rgba(59,130,246,.3)}
+.step-title{font-size:1rem;font-weight:700;margin-bottom:8px}
+.step-desc{font-size:.8rem;color:var(--slate);line-height:1.65}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  ARCHITECTURE                                                          */
+/* ────────────────────────────────────────────────────────────────────── */
+#arch{
+  padding:80px 0;
+  background:var(--glass);
+  border-top:1px solid var(--rim);border-bottom:1px solid var(--rim);
+}
+.arch-diagram{
+  margin-top:48px;
+  display:flex;align-items:center;justify-content:center;
+  flex-wrap:wrap;gap:0;
+}
+.arch-node{
+  background:var(--ink2);border:1px solid var(--rim);
+  border-radius:var(--r-sm);padding:14px 20px;
+  text-align:center;font-size:.78rem;min-width:110px;
+  transition:border-color var(--dur);
+}
+.arch-node:hover{border-color:var(--rimH)}
+.arch-node-ico{font-size:1.4rem;margin-bottom:6px}
+.arch-node-title{font-weight:700;font-size:.82rem;margin-bottom:3px}
+.arch-node-sub{font-size:.65rem;color:var(--slate2)}
+.arch-arrow{
+  display:flex;align-items:center;
+  padding:0 8px;color:var(--slate2);font-size:.85rem;
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  FOOTER                                                                */
+/* ────────────────────────────────────────────────────────────────────── */
+footer{
+  padding:48px 0;
+  border-top:1px solid var(--rim);
+}
+.foot-inner{
+  display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:24px;
+}
+.foot-brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--white)}
+.foot-links{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.foot-links a{
+  padding:6px 12px;border-radius:var(--r-xs);
+  font-size:.8rem;color:var(--slate);text-decoration:none;
+  transition:color var(--dur),background var(--dur);
+}
+.foot-links a:hover{color:var(--white);background:var(--glass)}
+.foot-copy{font-size:.74rem;color:var(--slate2)}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  SCROLL REVEAL — content always visible, animation is additive        */
+/* ────────────────────────────────────────────────────────────────────── */
+[data-reveal]{
+  opacity:1;
+  transform:none;
+  transition:none;
+}
+/* Only animate cards that explicitly opt-in */
+.animate-card{
+  opacity:0;
+  transform:translateY(20px);
+  transition:opacity .55s var(--ease),transform .55s var(--ease);
+}
+.animate-card.in{opacity:1;transform:none}
+.animate-card[data-delay="1"]{transition-delay:.1s}
+.animate-card[data-delay="2"]{transition-delay:.2s}
+.animate-card[data-delay="3"]{transition-delay:.3s}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/*  TOAST                                                                 */
+/* ────────────────────────────────────────────────────────────────────── */
+#toasts{
+  position:fixed;bottom:24px;right:24px;
+  display:flex;flex-direction:column;gap:10px;
+  z-index:9999;pointer-events:none;
+}
+.toast{
+  display:flex;align-items:flex-start;gap:12px;
+  background:var(--ink2);border:1px solid var(--rim);
+  border-radius:var(--r-sm);padding:13px 17px;
+  min-width:260px;max-width:360px;
+  box-shadow:var(--sh);backdrop-filter:blur(16px);
+  pointer-events:all;
+  animation:tIn .25s cubic-bezier(.34,1.56,.64,1);
+}
+.toast.out{animation:tOut .2s ease-in forwards}
+.toast.success{border-left:3px solid var(--green)}
+.toast.error  {border-left:3px solid var(--red)}
+.toast.info   {border-left:3px solid var(--blue)}
+.toast.warning{border-left:3px solid var(--amber)}
+.ti{font-size:1rem;flex-shrink:0;margin-top:1px}
+.tt{font-size:.8rem;font-weight:700;margin-bottom:2px}
+.tm{font-size:.73rem;color:var(--slate)}
+@keyframes tIn {from{opacity:0;transform:translateY(10px)scale(.96)}to{opacity:1;transform:none}}
+@keyframes tOut{to  {opacity:0;transform:translateY(6px) scale(.96)}}
+
+/* spinner */
+.spin{
+  display:inline-block;width:12px;height:12px;
+  border:2px solid rgba(255,255,255,.2);border-top-color:#fff;
+  border-radius:50%;animation:s .55s linear infinite;
+}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ─────────────────────────────────────────────────────────── -->
+<header id="header">
+  <div class="container">
+    <nav class="nav">
+      <a href="#" class="nav-brand">
+        <div class="nav-icon">⚡</div>
+        <span class="nav-title">DFP</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#how">How it works</a></li>
+        <li><a href="/docs" target="_blank">API Docs</a></li>
+      </ul>
+      <div class="nav-right">
+        <div class="status-pill">
+          <div class="dot" id="dot-api"></div>
+          <span id="lbl-api">Connecting…</span>
+        </div>
+        <a href="#app" class="btn btn-primary btn-sm">Try it →</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<!-- ── HERO ───────────────────────────────────────────────────────────── -->
+<section id="hero">
+  <div class="aurora">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <div class="orb orb-4"></div>
+  </div>
+  <div class="hero-grid"></div>
+
+  <div class="container">
+    <div class="hero-inner">
+      <!-- Copy -->
+      <div>
+        <div class="hero-eyebrow">
+          <span></span> Ray · FastAPI · Redis · Docker
+        </div>
+        <h1 class="display hero-heading">
+          Process <span class="typewriter grad" id="tw"></span><br>
+          <span class="grad">in parallel.</span>
+        </h1>
+        <p class="hero-sub">
+          Upload any CSV or JSON file, split it into chunks, and distribute
+          processing across Ray workers — all from a single REST API.
+          Results in seconds, not hours.
+        </p>
+        <div class="hero-ctas">
+          <a href="#app" class="btn btn-primary">Start processing →</a>
+          <a href="/docs" target="_blank" class="btn btn-ghost">View API docs</a>
+        </div>
+        <div class="hero-badges">
+          <div class="hero-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Parallel Ray workers
+          </div>
+          <div class="hero-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            CSV &amp; JSON support
+          </div>
+          <div class="hero-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Real-time progress
+          </div>
+          <div class="hero-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Auto retry on failure
+          </div>
+        </div>
+      </div>
+
+      <!-- Visual -->
+      <div class="hero-visual" id="hero-visual">
+        <!-- Floating badges -->
+        <div class="float-badge fb-1" data-reveal data-delay="3">
+          <div class="float-badge-icon">⚡</div>
+          <div>
+            <div class="float-badge-val">8x</div>
+            <span class="float-badge-lbl">Faster processing</span>
+          </div>
+        </div>
+        <div class="float-badge fb-2" data-reveal data-delay="4">
+          <div class="float-badge-icon">🔀</div>
+          <div>
+            <div class="float-badge-val">4</div>
+            <span class="float-badge-lbl">Ray workers</span>
+          </div>
+        </div>
+
+        <!-- 3D Terminal -->
+        <div class="card-3d" id="card3d">
+          <div class="terminal">
+            <div class="term-bar">
+              <div class="term-dot r"></div>
+              <div class="term-dot y"></div>
+              <div class="term-dot g"></div>
+              <div class="term-title">dfp — job runner</div>
+            </div>
+            <div class="term-body">
+              <div><span class="t-dim">$</span> <span class="t-key">curl</span> <span class="t-val">-X POST</span> /api/v1/upload</div>
+              <div class="t-dim">  ↳ file: data.csv (10 M rows)</div>
+              <div style="margin-top:6px"><span class="t-op">job_id</span>: <span class="t-val">"3fa85f64…"</span></div>
+              <div><span class="t-op">status</span>: <span class="t-val">"uploaded"</span></div>
+              <div><span class="t-op">chunks</span>: <span class="t-val">200</span></div>
+              <div style="margin-top:10px" class="t-dim">Processing via Ray workers…</div>
+              <div class="term-progress"><div class="term-progress-bar"></div></div>
+              <div><span class="t-prog">● processing</span> <span class="t-dim">chunk 142/200</span></div>
+              <div style="margin-top:6px"><span class="t-done">✓ completed</span></div>
+              <div><span class="t-op">result</span>: <span class="t-val">9,876,543.21</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── STATS ──────────────────────────────────────────────────────────── -->
+<section id="stats">
+  <div class="container">
+    <div class="stats-grid">
+      <div class="stat-item" data-reveal>
+        <div class="stat-num" data-count="500">0</div>
+        <div class="stat-lbl">Max file size (MB)</div>
+      </div>
+      <div class="stat-item" data-reveal data-delay="1">
+        <div class="stat-num" data-count="50000">0</div>
+        <div class="stat-lbl">Rows per chunk</div>
+      </div>
+      <div class="stat-item" data-reveal data-delay="2">
+        <div class="stat-num" data-count="3">0</div>
+        <div class="stat-lbl">Operations (sum, mean, filter)</div>
+      </div>
+      <div class="stat-item" data-reveal data-delay="3">
+        <div class="stat-num" data-count="24">0</div>
+        <div class="stat-lbl">Hour result retention</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── APP ────────────────────────────────────────────────────────────── -->
+<section id="app">
+  <div class="container">
+    <div>
+      <div class="section-label">🚀 Live Demo</div>
+      <h2 class="headline section-head">Try it right now</h2>
+      <p class="section-sub">Upload a real file and watch Ray workers process it across distributed chunks with live progress tracking.</p>
+    </div>
+
+    <div class="app-grid">
+      <!-- Upload form -->
+      <div class="card" data-reveal>
+        <div class="card-head">
+          <div class="card-title">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            New Job
+          </div>
+          <button class="btn btn-ghost btn-xs" onclick="resetForm()">Clear</button>
+        </div>
+        <div class="card-body">
+          <div class="drop" id="drop">
+            <input type="file" id="file-input" accept=".csv,.json,text/csv,application/json,text/plain">
+            <span class="drop-ico">📂</span>
+            <h3>Drop file here</h3>
+            <p>CSV or JSON · up to 500 MB</p>
+            <div id="file-pill" class="hide">
+              <div class="file-chip">
+                <span class="ftype" id="ftype-badge">CSV</span>
+                <span id="fname"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="fg">
+            <label class="lbl">Operation</label>
+            <div class="op-tabs">
+              <button class="op-tab active" data-op="sum"    onclick="selOp(this)">Σ Sum</button>
+              <button class="op-tab"        data-op="mean"   onclick="selOp(this)">x̄ Mean</button>
+              <button class="op-tab"        data-op="filter" onclick="selOp(this)">⊆ Filter</button>
+            </div>
+          </div>
+
+          <div class="fg">
+            <label class="lbl">Column name</label>
+            <input class="inp" id="inp-col" type="text" placeholder="e.g. amount" autocomplete="off">
+          </div>
+
+          <div class="fg hide" id="filter-grp">
+            <label class="lbl">Filter value</label>
+            <input class="inp" id="inp-fval" type="text" placeholder="e.g. A" autocomplete="off">
+          </div>
+
+          <div class="two-col">
+            <div>
+              <label class="lbl">Chunk size (rows)</label>
+              <input class="inp" id="inp-chunk" type="number" value="50000" min="1" max="500000">
+            </div>
+            <div>
+              <label class="lbl">Est. chunks</label>
+              <input class="inp" id="inp-est" type="text" value="—" readonly>
+            </div>
+          </div>
+
+          <button class="btn btn-primary btn-wide" id="btn-submit" onclick="submitJob()" disabled style="margin-top:18px">
+            <span id="btn-lbl">Select a file first</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Right stack -->
+      <div class="right-stack">
+        <!-- Active jobs -->
+        <div class="card" data-reveal data-delay="1">
+          <div class="card-head">
+            <div class="card-title">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Active Jobs
+            </div>
+            <span style="font-size:.65rem;color:var(--slate2)" id="poll-lbl"></span>
+          </div>
+          <div class="card-body" style="padding:12px 14px">
+            <div id="job-list" class="job-list">
+              <div class="empty"><div class="empty-ico">🔮</div><p>No jobs yet</p></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Result -->
+        <div class="card" id="result-card" style="display:none" data-reveal data-delay="2">
+          <div class="card-head">
+            <div class="card-title">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              Latest Result
+            </div>
+          </div>
+          <div class="result-display">
+            <div class="res-op" id="res-op"></div>
+            <div class="res-expr" id="res-expr"></div>
+            <div class="res-val" id="res-val">0</div>
+            <div class="res-jid" id="res-jid"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="card" id="hist-card" style="display:none;margin-top:20px" data-reveal>
+      <div class="card-head">
+        <div class="card-title">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Job History
+        </div>
+        <button class="btn btn-ghost btn-xs" onclick="clearHist()">Clear</button>
+      </div>
+      <div class="card-body" style="padding:0;overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:.76rem">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:9px 14px;font-size:.65rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--slate2);border-bottom:1px solid var(--rim);white-space:nowrap">Job ID</th>
+              <th style="text-align:left;padding:9px 14px;font-size:.65rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--slate2);border-bottom:1px solid var(--rim)">File</th>
+              <th style="text-align:left;padding:9px 14px;font-size:.65rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--slate2);border-bottom:1px solid var(--rim)">Op</th>
+              <th style="text-align:left;padding:9px 14px;font-size:.65rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--slate2);border-bottom:1px solid var(--rim)">Status</th>
+              <th style="text-align:left;padding:9px 14px;font-size:.65rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--slate2);border-bottom:1px solid var(--rim)">Result</th>
+              <th style="text-align:left;padding:9px 14px;font-size:.65rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--slate2);border-bottom:1px solid var(--rim)">When</th>
+            </tr>
+          </thead>
+          <tbody id="hist-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FEATURES ───────────────────────────────────────────────────────── -->
+<section id="features">
+  <div class="container">
+    <div style="text-align:center">
+      <div class="section-label">⚡ Capabilities</div>
+      <h2 class="headline section-head">Built for scale from day one</h2>
+      <p class="section-sub" style="margin:0 auto">Every layer is designed for distributed processing — from the API to the Ray cluster.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat-card" data-reveal data-delay="1">
+        <div class="feat-icon blue">⚡</div>
+        <div class="feat-title">True parallelism</div>
+        <p class="feat-desc">Ray remote functions run simultaneously across all workers. <code>ray.wait()</code> collects results as they arrive — no sequential blocking.</p>
+      </div>
+      <div class="feat-card" data-reveal data-delay="2">
+        <div class="feat-icon cyan">📊</div>
+        <div class="feat-title">Three operations</div>
+        <p class="feat-desc">Sum numeric columns, compute weighted means across unequal chunks, or count rows matching a filter — across any file size.</p>
+      </div>
+      <div class="feat-card" data-reveal data-delay="3">
+        <div class="feat-icon violet">🔄</div>
+        <div class="feat-title">Live progress</div>
+        <p class="feat-desc">Redis tracks completion per chunk with atomic WATCH/MULTI/EXEC updates. The UI polls every 2.5s and animates progress in real time.</p>
+      </div>
+      <div class="feat-card" data-reveal data-delay="1">
+        <div class="feat-icon green">🛡️</div>
+        <div class="feat-title">Fault tolerant</div>
+        <p class="feat-desc">Each Ray task retries up to 2 times automatically. Failed jobs surface a sanitised error message — no stack traces exposed to clients.</p>
+      </div>
+      <div class="feat-card" data-reveal data-delay="2">
+        <div class="feat-icon amber">📁</div>
+        <div class="feat-title">Multi-format</div>
+        <p class="feat-desc">CSV (UTF-8 with latin-1 fallback), JSON arrays, and JSON Lines. All formats are normalised to row-bounded CSV chunks internally.</p>
+      </div>
+      <div class="feat-card" data-reveal data-delay="3">
+        <div class="feat-icon red">🔐</div>
+        <div class="feat-title">Secure by default</div>
+        <p class="feat-desc">Content-type allowlist, 500 MB size cap, UUID-only paths (no traversal), optional API key gate, and configurable CORS origins.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── HOW IT WORKS ───────────────────────────────────────────────────── -->
+<section id="how">
+  <div class="container">
+    <div style="text-align:center">
+      <div class="section-label">🗺 Workflow</div>
+      <h2 class="headline section-head">Three steps, zero config</h2>
+      <p class="section-sub" style="margin:0 auto">From raw file to aggregated result in under a minute.</p>
+    </div>
+    <div class="steps">
+      <div class="step" data-reveal data-delay="1">
+        <div class="step-num">📤</div>
+        <div class="step-title">1. Upload</div>
+        <p class="step-desc">POST your CSV or JSON file with an operation and column name. The API validates, stores, and splits it into configurable chunks.</p>
+      </div>
+      <div class="step" data-reveal data-delay="2">
+        <div class="step-num">⚡</div>
+        <div class="step-title">2. Distribute</div>
+        <p class="step-desc">Ray workers process all chunks in parallel. A ResultAggregator actor collects partial results as they arrive using <code>ray.wait()</code>.</p>
+      </div>
+      <div class="step" data-reveal data-delay="3">
+        <div class="step-num">✅</div>
+        <div class="step-title">3. Result</div>
+        <p class="step-desc">Poll <code>/status/{id}</code> for live progress, then fetch the final aggregated value from <code>/result/{id}</code> when complete.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── ARCHITECTURE ───────────────────────────────────────────────────── -->
+<section id="arch">
+  <div class="container">
+    <div style="text-align:center">
+      <div class="section-label">🏗 Architecture</div>
+      <h2 class="headline section-head">System overview</h2>
+    </div>
+    <div class="arch-diagram" data-reveal>
+      <div class="arch-node">
+        <div class="arch-node-ico">🌐</div>
+        <div class="arch-node-title">Client</div>
+        <div class="arch-node-sub">HTTP / Browser</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node" style="border-color:rgba(59,130,246,.4)">
+        <div class="arch-node-ico">⚡</div>
+        <div class="arch-node-title">FastAPI</div>
+        <div class="arch-node-sub">:8000</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node" style="border-color:rgba(139,92,246,.4)">
+        <div class="arch-node-ico">☁️</div>
+        <div class="arch-node-title">Ray Head</div>
+        <div class="arch-node-sub">:10001 · :8265</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node" style="border-color:rgba(16,185,129,.4)">
+        <div class="arch-node-ico">🔀</div>
+        <div class="arch-node-title">Workers ×2</div>
+        <div class="arch-node-sub">4 CPUs total</div>
+      </div>
+      <div style="width:100%;height:16px;display:flex;align-items:center;justify-content:center;color:var(--slate2);font-size:.75rem;margin:6px 0">Redis ↔ FastAPI (job state · progress · results)</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
+<footer>
+  <div class="container">
+    <div class="foot-inner">
+      <a href="#" class="foot-brand">
+        <div class="nav-icon" style="width:32px;height:32px;font-size:15px">⚡</div>
+        <span style="font-size:.88rem;font-weight:700">Distributed File Processor</span>
+      </a>
+      <div class="foot-links">
+        <a href="/docs" target="_blank">API Docs</a>
+        <a href="http://localhost:8265" target="_blank">Ray Dashboard</a>
+        <a href="https://github.com/Shahriarin2garden/distributed-file-processor" target="_blank">GitHub</a>
+      </div>
+      <p class="foot-copy">Built with Ray · FastAPI · Redis · Docker</p>
+    </div>
+  </div>
+</footer>
+
+<!-- Toasts -->
+<div id="toasts"></div>
+
+<!-- ── SCRIPT ─────────────────────────────────────────────────────────── -->
+<script>
+// ── Config ────────────────────────────────────────────────────────────
+const API = '';  // same origin — served by FastAPI
+
+// ── State ─────────────────────────────────────────────────────────────
+let selFile = null, selOp = 'sum', apiUp = false;
+let jobs    = {};
+let history = JSON.parse(localStorage.getItem('dfps_h') || '[]');
+
+// ── Boot ──────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  setupHeader();
+  setupHero3D();
+  setupDropZone();
+  setupReveal();
+  scheduleHealth();
+  startPoll();
+  typeEffect();
+  renderHistory();
+  // Restore in-flight jobs
+  JSON.parse(localStorage.getItem('dfps_jobs') || '[]')
+    .forEach(j => { jobs[j.job_id] = j; });
+  if (Object.keys(jobs).length) renderJobs();
+});
+
+// ── Header scroll ─────────────────────────────────────────────────────
+function setupHeader() {
+  const h = document.getElementById('header');
+  window.addEventListener('scroll', () => {
+    h.classList.toggle('scrolled', window.scrollY > 30);
+  }, {passive:true});
+}
+
+// ── Typewriter ────────────────────────────────────────────────────────
+const WORDS = ['CSV files','JSON datasets','millions of rows','large files'];
+let wi=0, ci=0, del=false;
+function typeEffect() {
+  const el = document.getElementById('tw');
+  if (!el) return;
+  const w = WORDS[wi];
+  if (!del) { el.textContent = w.slice(0,ci++); if(ci>w.length){del=true;setTimeout(typeEffect,2200);return;} }
+  else       { el.textContent = w.slice(0,ci--); if(ci<0){del=false;wi=(wi+1)%WORDS.length;ci=0;} }
+  setTimeout(typeEffect, del?45:85);
+}
+
+// ── 3D card tilt ──────────────────────────────────────────────────────
+function setupHero3D() {
+  const card = document.getElementById('card3d');
+  const wrap = document.getElementById('hero-visual');
+  if (!wrap || !card) return;
+  wrap.addEventListener('mousemove', e => {
+    const r  = wrap.getBoundingClientRect();
+    const dx = ((e.clientX - r.left) / r.width  - .5) * 2;
+    const dy = ((e.clientY - r.top)  / r.height - .5) * 2;
+    card.style.transform = `perspective(900px) rotateY(${dx*9}deg) rotateX(${-dy*7}deg) translateZ(14px)`;
+  });
+  wrap.addEventListener('mouseleave', () => {
+    card.style.transform = 'perspective(900px) rotateY(0deg) rotateX(0deg) translateZ(0)';
+  });
+}
+
+// ── Scroll reveal ─────────────────────────────────────────────────────
+function setupReveal() {
+  const els = Array.from(document.querySelectorAll('[data-reveal]'));
+  const reveal = el => el.classList.add('in');
+
+  // Fallback: reveal everything after 800ms regardless
+  setTimeout(() => els.forEach(reveal), 800);
+
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) { reveal(e.target); obs.unobserve(e.target); } });
+  }, {threshold: 0, rootMargin:'0px 0px -40px 0px'});
+  els.forEach(el => obs.observe(el));
+
+  // Counter
+  const cObs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const el  = e.target;
+      const end = parseInt(el.dataset.count);
+      const dur = 1600;
+      const t0  = performance.now();
+      const tick = now => {
+        const p = Math.min((now-t0)/dur,1);
+        const v = Math.round(end * (1-Math.pow(1-p,4)));
+        el.textContent = v >= 1000 ? v.toLocaleString() : v;
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+      cObs.unobserve(el);
+    });
+  }, {threshold:.5});
+  document.querySelectorAll('[data-count]').forEach(el => cObs.observe(el));
+}
+
+// ── Health check ──────────────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const r = await fetch(`${API}/health`, {signal:AbortSignal.timeout(4000)});
+    const d = await r.json();
+    apiUp = true;
+    setDot('on', d.ray_initialized
+      ? 'API online · Ray connected'
+      : 'API online · Ray local');
+  } catch {
+    apiUp = false;
+    setDot('off', 'API offline — retrying…');
+  }
+}
+function setDot(cls, lbl) {
+  const d = document.getElementById('dot-api');
+  const l = document.getElementById('lbl-api');
+  d.className = `dot ${cls}`;
+  l.textContent = lbl;
+}
+function scheduleHealth() {
+  checkHealth().then(() => setTimeout(scheduleHealth, apiUp ? 15000 : 2000));
+}
+
+// ── Drop zone ─────────────────────────────────────────────────────────
+function setupDropZone() {
+  const zone  = document.getElementById('drop');
+  const input = document.getElementById('file-input');
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('over'); if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+  input.addEventListener('change', () => { if(input.files[0]) handleFile(input.files[0]); });
+}
+function handleFile(f) {
+  selFile = f;
+  const ext  = f.name.split('.').pop().toLowerCase();
+  const type = ext === 'json' ? 'json' : 'csv';
+  document.getElementById('ftype-badge').textContent = type.toUpperCase();
+  document.getElementById('ftype-badge').className   = `ftype ${type}`;
+  document.getElementById('fname').textContent       = f.name;
+  document.getElementById('file-pill').classList.remove('hide');
+  document.querySelector('#drop h3').textContent     = 'File selected';
+  document.querySelector('#drop p').textContent      = `${(f.size/1048576).toFixed(1)} MB`;
+  document.getElementById('inp-est').value           = `~${Math.max(1,Math.ceil(f.size/50/parseInt(document.getElementById('inp-chunk').value||50000)))}`;
+  updBtn();
+}
+document.getElementById('inp-chunk').addEventListener('input', () => {
+  if (selFile) document.getElementById('inp-est').value =
+    `~${Math.max(1,Math.ceil(selFile.size/50/parseInt(document.getElementById('inp-chunk').value||50000)))}`;
+});
+
+// ── Operation ─────────────────────────────────────────────────────────
+function selOp(btn) {
+  document.querySelectorAll('.op-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  selOp = btn.dataset.op;
+  document.getElementById('filter-grp').classList.toggle('hide', selOp !== 'filter');
+  updBtn();
+}
+
+// ── Submit button state ───────────────────────────────────────────────
+['inp-col','inp-fval'].forEach(id => document.getElementById(id).addEventListener('input', updBtn));
+function updBtn() {
+  const btn = document.getElementById('btn-submit');
+  const lbl = document.getElementById('btn-lbl');
+  const col = document.getElementById('inp-col').value.trim();
+  const fv  = document.getElementById('inp-fval').value.trim();
+  if (!selFile)                            { btn.disabled=true; lbl.textContent='Select a file first'; return; }
+  if (!col)                                { btn.disabled=true; lbl.textContent='Enter column name'; return; }
+  if (selOp==='filter' && !fv)             { btn.disabled=true; lbl.textContent='Enter filter value'; return; }
+  btn.disabled=false; lbl.textContent=`Run ${selOp.toUpperCase()} job →`;
+}
+
+// ── Submit ────────────────────────────────────────────────────────────
+async function submitJob() {
+  if (!selFile) return;
+  const col   = document.getElementById('inp-col').value.trim();
+  const fv    = document.getElementById('inp-fval').value.trim();
+  const chunk = parseInt(document.getElementById('inp-chunk').value) || 50000;
+  const btn   = document.getElementById('btn-submit');
+  const lbl   = document.getElementById('btn-lbl');
+  btn.disabled = true;
+  lbl.innerHTML = '<span class="spin"></span> Uploading…';
+  try {
+    const fd = new FormData();
+    fd.append('file', selFile);
+    fd.append('operation', selOp);
+    fd.append('column', col);
+    fd.append('chunk_size_rows', chunk);
+    if (selOp==='filter') fd.append('filter_value', fv);
+    const ur = await fetch(`${API}/api/v1/upload`, {method:'POST',body:fd});
+    if (!ur.ok) throw new Error((await ur.json()).detail || `Upload failed ${ur.status}`);
+    const ud = await ur.json();
+    toast('info', 'Uploaded', `${ud.estimated_chunks} chunks created`);
+    lbl.innerHTML = '<span class="spin"></span> Starting…';
+    const pr = await fetch(`${API}/api/v1/process/${ud.job_id}`, {method:'POST'});
+    if (!pr.ok) throw new Error((await pr.json()).detail || `Process failed ${pr.status}`);
+    const job = { job_id:ud.job_id, filename:selFile.name, operation:selOp, column:col, filter_value:fv||null, status:'processing', progress:0, started:new Date().toISOString() };
+    jobs[ud.job_id] = job;
+    saveJobs();
+    addHist(job);
+    renderJobs();
+    toast('success', 'Processing', `${selOp}(${col}) dispatched to Ray`);
+    resetForm();
+  } catch(e) {
+    toast('error', 'Error', e.message);
+    btn.disabled = false;
+    lbl.textContent = `Run ${selOp.toUpperCase()} job →`;
+  }
+}
+
+// ── Poll ──────────────────────────────────────────────────────────────
+function startPoll() { setInterval(pollJobs, 2500); }
+async function pollJobs() {
+  const active = Object.keys(jobs).filter(id => !['completed','failed'].includes(jobs[id].status));
+  document.getElementById('poll-lbl').textContent = active.length ? 'Live · 2.5s' : '';
+  await Promise.all(active.map(async id => {
+    try {
+      const r = await fetch(`${API}/api/v1/status/${id}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      jobs[id] = {...jobs[id], ...d};
+      if (d.status === 'completed') {
+        const rr = await fetch(`${API}/api/v1/result/${id}`);
+        if (rr.ok) {
+          const rd = await rr.json();
+          jobs[id].result = rd.result;
+          showResult(jobs[id]);
+          toast('success','Completed',`${jobs[id].operation}(${jobs[id].column}) = ${fmt(rd.result)}`);
+          updHist(id, jobs[id]);
+        }
+      } else if (d.status === 'failed') {
+        toast('error','Failed', d.error_message || 'Unknown error');
+        updHist(id, jobs[id]);
+      }
+    } catch{}
+  }));
+  saveJobs(); renderJobs();
+}
+
+// ── Render jobs ───────────────────────────────────────────────────────
+function renderJobs() {
+  const c  = document.getElementById('job-list');
+  const js = Object.values(jobs).sort((a,b)=>new Date(b.started||0)-new Date(a.started||0)).slice(0,6);
+  if (!js.length) { c.innerHTML='<div class="empty"><div class="empty-ico">🔮</div><p>No jobs yet</p></div>'; return; }
+  const active = js.filter(j=>j.status==='processing').length;
+  c.innerHTML = js.map(j => {
+    const prog = Math.round(j.progress||0);
+    const isA  = !['completed','failed'].includes(j.status);
+    return `<div class="job">
+      <div class="job-top">
+        <span class="job-id-txt">${j.job_id}</span>
+        <div class="jmeta">
+          <span class="sbadge ${j.status}">${isA?'<span class="spin" style="width:8px;height:8px;border-width:1.5px"></span> ':''}${j.status}</span>
+          <button class="btn btn-danger btn-xs" onclick="rmJob('${j.job_id}')">✕</button>
+        </div>
+      </div>
+      <div class="jchips">
+        <div class="jchip">op <span>${j.operation}</span></div>
+        <div class="jchip">col <span>${j.column}</span></div>
+        ${j.filter_value?`<div class="jchip">val <span>${j.filter_value}</span></div>`:''}
+        <div class="jchip">📄 <span style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">${j.filename||'file'}</span></div>
+      </div>
+      ${isA?`<div class="pbar-wrap"><div class="pbar" style="width:${prog}%"></div></div><div class="pbar-lbl"><span>Processing…</span><span class="pbar-pct">${prog}%</span></div>`:''}
+      ${j.result!=null?`<div class="job-result">✓ ${fmt(j.result)}</div>`:''}
+      ${j.status==='failed'?`<div class="job-error">✗ ${j.error_message||'Failed'}</div>`:''}
+    </div>`;
+  }).join('');
+}
+function rmJob(id) { delete jobs[id]; saveJobs(); renderJobs(); }
+function saveJobs() { localStorage.setItem('dfps_jobs', JSON.stringify(Object.values(jobs))); }
+
+// ── Result ────────────────────────────────────────────────────────────
+let raf = null;
+function showResult(job) {
+  const card = document.getElementById('result-card');
+  card.style.display = 'block';
+  document.getElementById('res-op').textContent   = job.operation.toUpperCase();
+  document.getElementById('res-expr').textContent = `${job.operation}(${job.column})`;
+  document.getElementById('res-jid').textContent  = `job: ${job.job_id.slice(0,8)}…`;
+  const el  = document.getElementById('res-val');
+  const end = job.result, start = parseFloat(el.dataset.last||0);
+  el.dataset.last = end;
+  const t0 = performance.now();
+  if (raf) cancelAnimationFrame(raf);
+  const tick = n => {
+    const p = Math.min((n-t0)/1400,1), e=1-Math.pow(1-p,4);
+    el.textContent = fmt(start+(end-start)*e);
+    if (p<1) raf=requestAnimationFrame(tick);
+  };
+  raf=requestAnimationFrame(tick);
+}
+
+// ── History ───────────────────────────────────────────────────────────
+function addHist(j) { history.unshift({...j,id:j.job_id}); history=history.slice(0,40); savH(); renderHistory(); }
+function updHist(id,j) {
+  const i=history.findIndex(h=>h.id===id);
+  if(i>=0){history[i]={...history[i],...j};savH();renderHistory();}
+}
+function clearHist() { history=[]; savH(); renderHistory(); }
+function savH() { localStorage.setItem('dfps_h',JSON.stringify(history)); }
+function renderHistory() {
+  const card = document.getElementById('hist-card');
+  const tb   = document.getElementById('hist-tbody');
+  if (!history.length) { card.style.display='none'; return; }
+  card.style.display = 'block';
+  const tdS = 'padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle';
+  tb.innerHTML = history.map(j=>`<tr>
+    <td style="${tdS};font-family:monospace;font-size:.7rem;color:var(--slate2)">${j.job_id.slice(0,8)}…</td>
+    <td style="${tdS};color:var(--slate);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${j.filename||''}">${j.filename||'—'}</td>
+    <td style="${tdS}"><span class="sbadge" style="background:rgba(99,147,255,.1);color:#93c5fd;border:1px solid rgba(99,147,255,.2)">${j.operation}</span></td>
+    <td style="${tdS}"><span class="sbadge ${j.status||'uploaded'}">${j.status||'uploaded'}</span></td>
+    <td style="${tdS};font-weight:700;color:var(--white)">${j.result!=null?fmt(j.result):j.status==='failed'?'<span style="color:var(--red)">✕</span>':'<span style="color:var(--slate2)">—</span>'}</td>
+    <td style="${tdS};font-size:.65rem;color:var(--slate2)">${j.started?ago(j.started):'—'}</td>
+  </tr>`).join('');
+}
+
+// ── Reset form ────────────────────────────────────────────────────────
+function resetForm() {
+  selFile=null;
+  document.getElementById('file-input').value='';
+  document.getElementById('file-pill').classList.add('hide');
+  document.querySelector('#drop h3').textContent='Drop file here';
+  document.querySelector('#drop p').textContent='CSV or JSON · up to 500 MB';
+  document.getElementById('inp-col').value='';
+  document.getElementById('inp-fval').value='';
+  document.getElementById('inp-chunk').value='50000';
+  document.getElementById('inp-est').value='—';
+  updBtn();
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────
+function toast(type, title, msg, ms=4000) {
+  const ico={success:'✅',error:'❌',info:'ℹ️',warning:'⚠️'};
+  const el=document.createElement('div');
+  el.className=`toast ${type}`;
+  el.innerHTML=`<div class="ti">${ico[type]}</div><div><div class="tt">${title}</div><div class="tm">${msg}</div></div>`;
+  document.getElementById('toasts').prepend(el);
+  setTimeout(()=>{ el.classList.add('out'); setTimeout(()=>el.remove(),200); }, ms);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+function fmt(n) {
+  if (n==null) return '—';
+  const v=parseFloat(n);
+  return Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined,{maximumFractionDigits:6});
+}
+function ago(iso) {
+  const s=Math.round((Date.now()-new Date(iso))/1000);
+  if(s<60) return `${s}s ago`;
+  if(s<3600) return `${Math.round(s/60)}m ago`;
+  return `${Math.round(s/3600)}h ago`;
+}
+</script>
+</body>
+</html>
