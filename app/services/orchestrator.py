@@ -1,7 +1,15 @@
 import asyncio
+import datetime
+import time
+from typing import Optional
+
 import ray
 
-from app.services.ray_tasks import process_chunk
+from app.config import settings
+from app.services.ray_tasks import (
+    process_chunk_faulty,
+    process_chunk_tracked,
+)
 from app.services.ray_actor import ResultAggregator
 from app.services.chunker import chunker_service
 from app.services.storage import storage_service
@@ -11,6 +19,28 @@ from app.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 _CHUNK_TIMEOUT_S = 300  # per-chunk timeout
+_DEMO_MAX_RETRIES = 3
+
+
+def _iso(ts: float) -> str:
+    return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
+
+
+def _record_event(
+    job_id: str, kind: str, message: str, chunk: Optional[str] = None,
+    worker: Optional[str] = None, attempts: Optional[int] = None,
+) -> None:
+    """Append a structured, timestamped event to the job's event log in Redis."""
+    ts = time.time()
+    redis_client.append_event(job_id, {
+        "t": ts,
+        "ts": _iso(ts),
+        "kind": kind,
+        "message": message,
+        "chunk": chunk,
+        "worker": worker,
+        "attempts": attempts,
+    })
 
 
 class Orchestrator:
@@ -20,9 +50,12 @@ class Orchestrator:
             logger.error(f"Job {job_id} not found in Redis")
             return
 
+        started = time.time()
         try:
             metadata["status"] = "processing"
+            metadata["started_at"] = _iso(started)
             redis_client.set_job_metadata(job_id, metadata)
+            _record_event(job_id, "stage", "orchestrator started")
 
             # Determine file type and split into chunks
             file_ext = metadata.get("file_extension", "csv")
@@ -50,39 +83,150 @@ class Orchestrator:
                 raise ValueError("File produced zero chunks — check file content")
 
             redis_client.set_chunks(job_id, chunk_paths)
+            metadata["actual_chunks"] = len(chunk_paths)
+            redis_client.set_job_metadata(job_id, metadata)
+            _record_event(
+                job_id, "stage",
+                f"split complete — {len(chunk_paths)} chunks created",
+            )
 
-            # Launch all Ray tasks in parallel
+            demo_chunks: set[int] = {
+                int(c) for c in metadata.get("demo_fail_chunks", [])
+            } if settings.demo_mode else set()
+
+            # Launch Ray tasks with bounded concurrency, collecting via ray.wait
             aggregator = ResultAggregator.remote(metadata["operation"])
-            task_refs = [
-                process_chunk.remote(
-                    chunk_path,
-                    metadata["operation"],
-                    metadata["column"],
-                    metadata.get("filter_value"),
-                )
-                for chunk_path in chunk_paths
-            ]
+            capacity = max(1, settings.max_concurrent_tasks)
 
-            # Collect results as they finish (true parallelism via ray.wait)
-            pending = list(task_refs)
+            tasks_store: dict = {}
+            in_flight: dict = {}  # ref -> {idx, demo, attempt, dispatched_at}
+            pending = list(range(len(chunk_paths)))
             completed = 0
-            while pending:
-                done, pending = ray.wait(pending, num_returns=1, timeout=_CHUNK_TIMEOUT_S)
-                if not done:
-                    raise TimeoutError(
-                        f"Ray worker did not respond within {_CHUNK_TIMEOUT_S}s"
+
+            def _dispatch(idx: int, demo: bool, attempt: int) -> None:
+                now = time.time()
+                tasks_store[str(idx)] = {
+                    "chunk_id": idx,
+                    "label": f"chunk-{idx:03d}",
+                    "status": "running",
+                    "attempts": attempt,
+                    "started_at": now,
+                }
+                if demo:
+                    ref = process_chunk_faulty.remote(
+                        chunk_paths[idx], metadata["operation"],
+                        metadata["column"], metadata.get("filter_value"),
                     )
-                partial = ray.get(done[0])
-                aggregator.add_result.remote(partial)
-                completed += 1
-                redis_client.update_progress(job_id, completed, len(task_refs))
+                    _record_event(
+                        job_id, "dispatch",
+                        f"{tasks_store[str(idx)]['label']} dispatched "
+                        f"(attempt {attempt}, fault-injected)",
+                        chunk=tasks_store[str(idx)]["label"],
+                    )
+                else:
+                    ref = process_chunk_tracked.remote(
+                        chunk_paths[idx], metadata["operation"],
+                        metadata["column"], metadata.get("filter_value"),
+                    )
+                    _record_event(
+                        job_id, "dispatch",
+                        f"{tasks_store[str(idx)]['label']} dispatched",
+                        chunk=tasks_store[str(idx)]["label"],
+                    )
+                in_flight[ref] = {"idx": idx, "demo": demo, "attempt": attempt,
+                                  "dispatched_at": now}
+
+            while pending or in_flight:
+                # Dispatch up to the concurrency limit.
+                while pending and len(in_flight) < capacity:
+                    idx = pending.pop(0)
+                    _dispatch(idx, demo=idx in demo_chunks, attempt=1)
+
+                if not in_flight:
+                    break
+
+                refs = list(in_flight.keys())
+                done, _ = ray.wait(refs, num_returns=len(refs), timeout=0.2)
+
+                if not done:
+                    # Check per-task timeout.
+                    now = time.time()
+                    for ref, info in list(in_flight.items()):
+                        if now - info["dispatched_at"] > _CHUNK_TIMEOUT_S:
+                            raise TimeoutError(
+                                f"Ray worker did not respond within {_CHUNK_TIMEOUT_S}s"
+                            )
+                    await asyncio.sleep(0.05)
+                    continue
+
+                for ref in done:
+                    info = in_flight.pop(ref)
+                    idx = info["idx"]
+                    label = f"chunk-{idx:03d}"
+                    try:
+                        partial = ray.get(ref)
+                    except Exception as exc:
+                        if not info["demo"]:
+                            raise  # Ray already retried internally; real failure
+                        # Demo fault: task failed on purpose — retry normally.
+                        _record_event(
+                            job_id, "fail",
+                            f"{label} failed — worker unreachable",
+                            chunk=label,
+                            attempts=info["attempt"],
+                        )
+                        if info["attempt"] >= _DEMO_MAX_RETRIES:
+                            raise
+                        _record_event(
+                            job_id, "retry",
+                            f"{label} retry scheduled",
+                            chunk=label,
+                            attempts=info["attempt"] + 1,
+                        )
+                        tasks_store[str(idx)]["attempts"] = info["attempt"] + 1
+                        _dispatch(idx, demo=False, attempt=info["attempt"] + 1)
+                        continue
+
+                    worker = partial.get("worker") if isinstance(partial, dict) else None
+                    finished = time.time()
+                    tasks_store[str(idx)].update({
+                        "status": "completed",
+                        "worker": worker,
+                        "finished_at": finished,
+                        "duration_ms": round((finished - tasks_store[str(idx)]["started_at"]) * 1000, 1),
+                    })
+                    redis_client.set_tasks(job_id, tasks_store)
+                    _record_event(
+                        job_id, "complete",
+                        f"{label} completed on worker {worker or 'unknown'}",
+                        chunk=label,
+                        worker=worker,
+                        attempts=info["attempt"],
+                    )
+                    aggregator.add_result.remote(partial)
+                    completed += 1
+                    redis_client.update_progress(job_id, completed, len(chunk_paths))
 
             final_result = ray.get(aggregator.get_final.remote())
             redis_client.set_result(job_id, final_result)
 
+            finished = time.time()
             metadata["status"] = "completed"
             metadata["progress"] = 100.0
+            metadata["finished_at"] = _iso(finished)
+            metadata["duration_ms"] = round((finished - started) * 1000, 1)
+            worker_counts: dict = {}
+            for task in tasks_store.values():
+                w = task.get("worker")
+                if w:
+                    worker_counts[w] = worker_counts.get(w, 0) + 1
+            metadata["worker_usage"] = worker_counts
             redis_client.set_job_metadata(job_id, metadata)
+            _record_event(
+                job_id, "result",
+                f"aggregation complete — result {final_result}",
+                attempts=1,
+            )
             logger.info(f"Job {job_id} completed: {final_result}")
 
             # Clean up chunk files
@@ -98,7 +242,12 @@ class Orchestrator:
             current["status"] = "failed"
             # Sanitize error message — don't expose full stack trace to clients
             current["error_message"] = type(exc).__name__ + ": " + str(exc)[:200]
+            current["finished_at"] = _iso(time.time())
             redis_client.set_job_metadata(job_id, current)
+            _record_event(
+                job_id, "fail", f"job failed — {current['error_message']}",
+                attempts=1,
+            )
 
 
 orchestrator = Orchestrator()
