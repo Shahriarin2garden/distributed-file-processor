@@ -73,7 +73,13 @@ async def api_key_middleware(request: Request, call_next):
             key = request.headers.get("X-API-Key")
             if not key or key != settings.api_key_secret:
                 return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-    return await call_next(request)
+    response = await call_next(request)
+    # Never let the browser keep stale UI assets: the SPA and its ES-module
+    # graph are revalidated on every load so diagram redesigns show up
+    # immediately after a container rebuild.
+    if request.url.path == "/" or request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 
 app.include_router(api_router, prefix="/api/v1")
