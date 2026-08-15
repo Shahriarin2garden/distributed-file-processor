@@ -3,7 +3,9 @@
 
 function baseUrl() {
   try {
-    return (localStorage.getItem("dfp.apiBase") || "").replace(/\/$/, "");
+    const raw = localStorage.getItem("dfp.settings");
+    const apiBase = raw ? (JSON.parse(raw).apiBase || "") : "";
+    return apiBase.replace(/\/$/, "");
   } catch {
     return "";
   }

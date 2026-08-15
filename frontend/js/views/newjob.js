@@ -1,15 +1,37 @@
+// New-job wizard: INPUT → OPERATION → EXECUTION → REVIEW.
+// Every estimate comes from the real /inspect response; column types are
+// inferred from the returned sample, never fabricated.
+
 import { store } from "../store.js";
 import { api } from "../api.js";
 import { h, clear, on } from "../dom.js";
 import { icon } from "../icons.js";
-import { SectionTitle, EmptyState } from "../components.js";
+import { SectionTitle } from "../components.js";
 import { formatBytes, formatNumber } from "../format.js";
 
 const STEPS = [
-  { id: "input", label: "Input" },
-  { id: "operation", label: "Operation" },
-  { id: "settings", label: "Settings" },
-  { id: "review", label: "Review" },
+  { id: "input", label: "INPUT" },
+  { id: "operation", label: "OPERATION" },
+  { id: "settings", label: "EXECUTION" },
+  { id: "review", label: "REVIEW" },
+];
+
+const OPS = [
+  {
+    id: "sum", label: "Sum", symbol: "Σ", icon: "sigma",
+    sub: "Distributed numeric aggregation",
+    algo: "Each worker returns the partial total of its chunk. The aggregator sums the partials — order-independent and exact.",
+  },
+  {
+    id: "mean", label: "Mean", symbol: "μ", icon: "gauge",
+    sub: "Weighted distributed average",
+    algo: "Workers return (sum, count). The aggregator combines both values — this avoids chunk-size bias when the last chunk is smaller than the rest.",
+  },
+  {
+    id: "filter", label: "Filter", symbol: "⌕", icon: "filter",
+    sub: "Distributed conditional count",
+    algo: "Each worker counts rows where the column equals the target value. The aggregator sums the per-chunk counts into the total.",
+  },
 ];
 
 export async function mountNewJob(root) {
@@ -24,14 +46,14 @@ export async function mountNewJob(root) {
       <div class="wizard-steps" role="tablist" aria-label="Wizard steps">
         ${STEPS.map((s, i) => `
           <button type="button" class="wizard-step" data-step="${s.id}" role="tab" aria-selected="${i === 0}">
-            <span class="wizard-step-num">${i + 1}</span>
+            <span class="wizard-step-num">0${i + 1}</span>
             <span>${s.label}</span>
           </button>`).join("")}
       </div>
       <div class="panel">
         <div class="panel-body" id="wizard-body"></div>
         <div class="wizard-nav">
-          <button class="btn btn-ghost" id="wz-back" disabled>Back</button>
+          <button class="btn btn-ghost" id="wz-back" disabled>${icon("arrowLeft", 13)} Back</button>
           <div class="wizard-nav-right">
             <span class="mono xs" id="wz-status"></span>
             <button class="btn btn-ghost" id="wz-next">Next ${icon("arrowRight", 13)}</button>
@@ -52,10 +74,9 @@ export async function mountNewJob(root) {
     column: "",
     filterValue: "",
     chunkSize: 100000,
-    demoFailChunks: 0,
+    demoArmed: false,
     inspection: null,
     inspecting: false,
-    runState: null, // {status, progress}
   };
 
   const body = root.querySelector("#wizard-body");
@@ -73,7 +94,7 @@ export async function mountNewJob(root) {
       if (state.operation === "filter" && (!state.column || !state.filterValue)) return false;
       return true;
     },
-    settings: () => state.chunkSize > 0,
+    settings: () => state.chunkSize >= 1000,
     review: () => true,
   };
 
@@ -106,18 +127,12 @@ export async function mountNewJob(root) {
     const el = h(`
       <div class="wizard-step-body">
         <label class="dropzone" id="dz">
-          <input type="file" id="file-input" accept=".csv,.json" hidden />
+          <input type="file" id="file-input" accept=".csv,.json,.jsonl" hidden />
           <span class="dropzone-icon">${icon("upload", 22)}</span>
           <div>
             <div class="dropzone-title">Drop a CSV or JSON file here</div>
             <div class="dropzone-sub">or click to browse · processed in parallel chunks over Ray</div>
           </div>
-          ${state.file ? `
-            <div class="file-pill">
-              <span class="file-badge ext-${state.fileExtension.toLowerCase()}">${state.fileExtension}</span>
-              <span class="mono">${escapeHtml(state.fileName)}</span>
-              <span class="mono xs dim">${formatBytes(state.fileSize)}</span>
-            </div>` : ""}
         </label>
         <div id="inspect-result"></div>
       </div>`);
@@ -149,46 +164,96 @@ export async function mountNewJob(root) {
     inspectIfNeeded();
   };
 
+  const inferType = (v) => {
+    if (v === null || v === undefined || v === "") return "empty";
+    if (typeof v === "boolean") return "bool";
+    if (typeof v === "number") return "number";
+    const s = String(v);
+    if (s.trim() !== "" && !Number.isNaN(Number(s))) return "number";
+    return "string";
+  };
+
+  const renderInspected = () => {
+    const insp = state.inspection;
+    const box = body.querySelector("#inspect-result") || body.querySelector("#run-state");
+    if (!insp) return;
+    const cols = (insp.columns || []).map((c) => ({
+      name: c,
+      type: inferType((insp.sample || []).map((r) => r[c]).find((v) => v !== undefined && v !== null && v !== "")) || "string",
+    }));
+    const sample = (insp.sample || []).slice(0, 5);
+    const preview = sample.length && cols.length ? `
+      <div class="preview">
+        <div class="preview-head">Sample preview <span class="mono xs dim">first ${sample.length} rows</span></div>
+        <div class="table-scroll"><table class="table">
+          <thead><tr>${cols.map((c) => `<th>${esc(c.name)} <span class="type-tag">${c.type}</span></th>`).join("")}</tr></thead>
+          <tbody>${sample.map((row) => `<tr>${cols.map((c) => `<td class="mono">${esc(row[c] ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody>
+        </table></div>
+      </div>` : "";
+    box.innerHTML = `
+      <div class="inspected">
+        <span class="inspected-head">
+          <span class="file-badge ext-${state.fileExtension.toLowerCase()}">${state.fileExtension.toUpperCase()}</span>
+          <span class="mono">${esc(state.fileName)}</span>
+          <span class="mono xs dim">${formatBytes(state.fileSize)}</span>
+        </span>
+        <div class="inspected-stats mono">
+          <span>${formatNumber(insp.row_count)} rows</span>
+          <span>${formatNumber(insp.estimated_chunks)} chunks @ ${formatNumber(state.chunkSize)} rows</span>
+          <span>${cols.length} columns</span>
+        </div>
+        <div class="inspected-cols">
+          ${cols.map((c) => `<span class="col-pill"><code>${esc(c.name)}</code><em>${c.type}</em></span>`).join("")}
+        </div>
+        <div class="inspected-valid"><span class="dot on"></span>validation passed — ready to distribute</div>
+        ${preview}
+      </div>`;
+  };
+
   const renderOperation = () => {
-    const cards = [
-      { id: "sum", label: "Sum", sub: "Total of a numeric column across all chunks", icon: "sigma" },
-      { id: "mean", label: "Mean", sub: "Average of a numeric column", icon: "gauge" },
-      { id: "filter", label: "Filter", sub: "Rows where a column matches a value", icon: "filter" },
-    ];
     const el = h(`
       <div class="wizard-step-body">
         <div class="op-grid">
-          ${cards.map((c) => `
+          ${OPS.map((c) => `
             <button type="button" class="op-card${state.operation === c.id ? " active" : ""}" data-op="${c.id}">
-              <span class="op-icon">${icon(c.icon, 20)}</span>
+              <span class="op-symbol mono">${c.symbol}</span>
               <span class="op-name">${c.label}</span>
               <span class="op-sub">${c.sub}</span>
             </button>`).join("")}
         </div>
+        <div class="op-algo" id="op-algo"></div>
         <div class="form-row">
           <label class="field">
             <span class="field-label">Target column</span>
-            <input class="input mono" id="op-column" list="col-hints" placeholder="e.g. value" value="${escapeAttr(state.column)}" />
+            <input class="input mono" id="op-column" list="col-hints" placeholder="e.g. value" value="${escAttr(state.column)}" />
             <datalist id="col-hints"></datalist>
           </label>
         </div>
         <div class="form-row" id="filter-row" hidden>
           <label class="field">
             <span class="field-label">Filter value</span>
-            <input class="input mono" id="op-filter" placeholder="e.g. 100 or region==north" value="${escapeAttr(state.filterValue)}" />
+            <input class="input mono" id="op-filter" placeholder="e.g. alpha" value="${escAttr(state.filterValue)}" />
+            <span class="field-hint">Rows where the column equals this value are counted.</span>
           </label>
         </div>
       </div>`);
 
     const opBtns = [...el.querySelectorAll(".op-card")];
+    const opAlgo = el.querySelector("#op-algo");
+    const updateAlgo = () => {
+      const c = OPS.find((x) => x.id === state.operation);
+      opAlgo.innerHTML = c ? `<div class="op-algo-inner">${icon("info", 14)}<span><b>${c.label}.</b> ${c.algo}</span></div>` : "";
+    };
     opBtns.forEach((b) => b.addEventListener("click", () => {
       state.operation = b.dataset.op;
-      el.querySelectorAll(".op-card").forEach((x) => x.classList.toggle("active", x === b));
+      opBtns.forEach((x) => x.classList.toggle("active", x === b));
       el.querySelector("#filter-row").hidden = state.operation !== "filter";
       syncColumns();
+      updateAlgo();
       updateNav();
     }));
     el.querySelector("#filter-row").hidden = state.operation !== "filter";
+    updateAlgo();
     const colInput = el.querySelector("#op-column");
     colInput.addEventListener("input", () => { state.column = colInput.value; updateNav(); });
     el.querySelector("#op-filter").addEventListener("input", (e) => { state.filterValue = e.target.value; updateNav(); });
@@ -196,8 +261,7 @@ export async function mountNewJob(root) {
     const syncColumns = () => {
       const dl = el.querySelector("#col-hints");
       dl.replaceChildren();
-      const cols = state.inspection?.columns || [];
-      cols.forEach((c) => dl.appendChild(h(`<option value="${escapeAttr(c)}"></option>`)));
+      (state.inspection?.columns || []).forEach((c) => dl.appendChild(h(`<option value="${escAttr(c)}"></option>`)));
     };
     syncColumns();
     return el;
@@ -214,37 +278,57 @@ export async function mountNewJob(root) {
             <span class="field-hint">Each chunk is processed by an independent Ray worker task. Lower = more parallelism, higher = less overhead.</span>
           </label>
         </div>
+        <div class="settings-estimate" id="chunk-estimate"></div>
         <div class="form-row" id="demo-row" ${demo ? "" : "hidden"}>
           <label class="check">
-            <input type="checkbox" id="demo-fail" />
+            <input type="checkbox" id="demo-fail" ${state.demoArmed ? "checked" : ""} />
             <span>Fault-inject the first chunk</span>
             <span class="field-hint">Simulates a worker crash to demonstrate automatic retry. Enabled when DEMO_MODE=true.</span>
           </label>
         </div>
       </div>`);
+    const estimateEl = el.querySelector("#chunk-estimate");
+    const updateEstimate = () => {
+      const insp = state.inspection;
+      if (insp && insp.row_count) {
+        const est = Math.max(1, Math.ceil(insp.row_count / state.chunkSize));
+        estimateEl.innerHTML = `
+          <div class="estimate-row">
+            <span>Estimated chunks</span><span class="mono">${formatNumber(est)}</span>
+          </div>
+          <div class="estimate-bar">
+            ${Array.from({ length: Math.min(est, 24) }, (_, i) => `<span class="est-chunk${i < 2 ? " on" : ""}"></span>`).join("")}
+          </div>
+          <div class="mono xs dim">${formatNumber(insp.row_count)} rows ÷ ${formatNumber(state.chunkSize)} rows/chunk</div>`;
+      } else {
+        estimateEl.innerHTML = `<div class="mono xs dim">upload a file to see the chunk estimate</div>`;
+      }
+    };
     el.querySelector("#chunk-size").addEventListener("input", (e) => {
       state.chunkSize = parseInt(e.target.value, 10) || 0;
+      updateEstimate();
       updateNav();
     });
     el.querySelector("#demo-fail").addEventListener("change", (e) => {
-      state.demoFailChunks = e.target.checked ? 0 : 0; // UI toggle; value mapped at submit
       state.demoArmed = e.target.checked;
     });
+    updateEstimate();
     return el;
   };
 
   const renderReview = () => {
-    const demoArmed = !!state.demoArmed;
+    const insp = state.inspection;
+    const concurrency = store.system?.max_concurrent_tasks ?? "—";
     const rows = [
-      ["File", escapeHtml(state.fileName || "—")],
-      ["Size", formatBytes(state.fileSize)],
+      ["Input", `${escHtml(state.fileName || "—")} · ${formatBytes(state.fileSize)}`],
       ["Operation", state.operation],
-      ["Column", escapeHtml(state.column || "—")],
-      ["Filter value", escapeHtml(state.filterValue || "—")],
+      ["Column", escHtml(state.column || "—")],
+      ["Filter value", escHtml(state.filterValue || "—")],
       ["Chunk size", formatNumber(state.chunkSize) + " rows"],
+      ["Estimated chunks", insp ? formatNumber(insp.estimated_chunks) : "—"],
+      ["Max concurrent tasks", concurrency],
     ];
-    if (store.demoMode) rows.push(["Demo fault", demoArmed ? "inject on chunk 1" : "off"]);
-    if (state.inspection) rows.push(["Estimated chunks", formatNumber(state.inspection.estimated_chunks)]);
+    if (store.demoMode) rows.push(["Fault injection", state.demoArmed ? "chunk 1" : "off"]);
     const el = h(`
       <div class="wizard-step-body">
         <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd class="mono">${v}</dd>`).join("")}</dl>
@@ -260,23 +344,16 @@ export async function mountNewJob(root) {
     try {
       const insp = await api.inspect(state.file, state.chunkSize);
       state.inspection = insp;
-      const box = body.querySelector("#run-state") || body.querySelector("#inspect-result");
-      if (box) {
-        box.innerHTML = `
-          <div class="inspected">
-            ${icon("checkCircle", 14)} <b>${formatNumber(insp.row_count)}</b> rows · ${formatNumber(insp.estimated_chunks)} chunks · columns: ${insp.columns.map((c) => `<code>${escapeHtml(c)}</code>`).join(" ")}
-          </div>`;
-      }
-    } catch {
-      statusEl.textContent = "inspection unavailable";
+      renderInspected();
+    } catch (err) {
+      statusEl.textContent = err.message || "inspection unavailable";
     } finally {
       state.inspecting = false;
-      statusEl.textContent = "";
+      setTimeout(() => { if (statusEl.textContent === "inspecting file…") statusEl.textContent = ""; }, 400);
     }
   };
 
   const runJob = async () => {
-    const demoArmed = !!state.demoArmed;
     statusEl.textContent = "dispatching…";
     runBtn.disabled = true;
     try {
@@ -286,8 +363,9 @@ export async function mountNewJob(root) {
         column: state.column,
         filterValue: state.filterValue,
         chunkSize: state.chunkSize,
-        demoFailChunks: demoArmed ? 0 : undefined,
+        demoFailChunks: state.demoArmed ? 0 : undefined,
       });
+      await api.process(res.job_id);
       window.location.hash = `#/job/${res.job_id}`;
     } catch (err) {
       statusEl.textContent = err.message;
@@ -303,14 +381,14 @@ export async function mountNewJob(root) {
   nextBtn.addEventListener("click", () => go(1));
   backBtn.addEventListener("click", () => go(-1));
   runBtn.addEventListener("click", runJob);
-  on(body, "[data-op]", "click", () => {});
 
   renderStep();
 }
 
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function esc(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function escapeAttr(s) {
-  return escapeHtml(s).replace(/"/g, "&quot;");
+function escHtml(s) { return esc(s); }
+function escAttr(s) {
+  return esc(s).replace(/"/g, "&quot;");
 }

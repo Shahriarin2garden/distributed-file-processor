@@ -40,11 +40,30 @@ export async function mountHistory(root) {
   let statusFilter = "";
   let q = "";
   let offset = 0;
+  let sortKey = "created";
+  let sortDir = -1;
 
   const applyFilter = () => {
     offset = 0;
     render();
   };
+
+  const SORTS = {
+    file: (j) => j.filename.toLowerCase(),
+    op: (j) => j.operation,
+    size: (j) => j.fileSize,
+    status: (j) => j.status,
+    duration: (j) => j.durationMs ?? -1,
+    result: (j) => j.result ?? -1,
+    created: (j) => j.createdAt || "",
+  };
+
+  on(root, "th[data-sort]", "click", (th) => {
+    const key = th.dataset.sort;
+    if (sortKey === key) sortDir = -sortDir;
+    else { sortKey = key; sortDir = 1; }
+    applyFilter();
+  });
 
   statusBtns.forEach((b) => b.addEventListener("click", () => {
     statusFilter = b.dataset.v;
@@ -73,7 +92,12 @@ export async function mountHistory(root) {
     let filtered = all.map(normalizeJob);
     if (statusFilter) filtered = filtered.filter((j) => j.status === statusFilter);
     if (q) filtered = filtered.filter((j) => j.filename.toLowerCase().includes(q.toLowerCase()));
-    filtered.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    filtered.sort((a, b) => {
+      const av = SORTS[sortKey](a);
+      const bv = SORTS[sortKey](b);
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * sortDir;
+      return String(av).localeCompare(String(bv)) * sortDir;
+    });
 
     const page = filtered.slice(offset, offset + PAGE);
 
@@ -84,6 +108,11 @@ export async function mountHistory(root) {
       })));
       return;
     }
+
+    const th = (label, key) => `
+      <th data-sort="${key}" tabindex="0" role="button" aria-label="Sort by ${label}">
+        ${label}${sortKey === key ? (sortDir < 0 ? " ↓" : " ↑") : ""}
+      </th>`;
 
     const rows = page.map((j) => `
       <tr data-href="#/job/${j.id}">
@@ -102,7 +131,7 @@ export async function mountHistory(root) {
         <div class="table-scroll">
           <table class="table">
             <thead><tr>
-              <th>Type</th><th>File</th><th>Operation</th><th>Size</th><th>Status</th><th>Duration</th><th>Result</th><th>Created</th>
+              ${th("Type", "ext")}${th("File", "file")}${th("Operation", "op")}${th("Size", "size")}${th("Status", "status")}${th("Duration", "duration")}${th("Result", "result")}${th("Created", "created")}
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -113,6 +142,11 @@ export async function mountHistory(root) {
 
     tableEl.querySelectorAll("tr[data-href]").forEach((tr) => {
       tr.addEventListener("click", () => { window.location.hash = tr.dataset.href; });
+    });
+    tableEl.querySelectorAll("th[data-sort]").forEach((th) => {
+      th.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); th.click(); }
+      });
     });
   };
 
