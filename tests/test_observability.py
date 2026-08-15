@@ -155,6 +155,61 @@ class TestBenchmark:
         assert r.status_code == 400
 
 
+class TestBenchmarkStudy:
+    def test_study_sweeps_sizes_and_verifies(self, client):
+        r = client.post(
+            "/api/v1/benchmark/study?operation=sum&chunk_size=1000&sizes=1000,2000,3000"
+        )
+        assert r.status_code == 202
+        body = r.json()
+        assert body["study_id"]
+        assert body["status"] == "queued"
+        assert body["sizes"] == [1000, 2000, 3000]
+
+        deadline = time.time() + 90
+        data = None
+        while time.time() < deadline:
+            data = client.get(f"/api/v1/benchmark/study/{body['study_id']}").json()
+            if data["status"] in ("completed", "failed"):
+                break
+            time.sleep(0.5)
+
+        assert data is not None
+        assert data["status"] == "completed", f"study failed: {data.get('error')}"
+        assert len(data["points"]) == 3
+        for p in data["points"]:
+            assert p["sequential_ms"] > 0
+            assert p["distributed_ms"] > 0
+            assert p["speedup"] is not None
+            assert p["sequential_result"] == p["distributed_result"]
+        assert data["notes"], "study should explain the measurements honestly"
+        # crossover is computed from real data, so it may legitimately be null
+        assert "crossover_rows" in data
+
+    def test_study_rejects_too_many_sizes(self, client):
+        r = client.post(
+            "/api/v1/benchmark/study?operation=sum&sizes=1,2,3,4,5,6,7,8,9"
+        )
+        assert r.status_code == 400
+
+    def test_study_rejects_out_of_range_sizes(self, client):
+        r = client.post("/api/v1/benchmark/study?operation=sum&sizes=50,100")
+        assert r.status_code == 400
+
+    def test_study_rejects_invalid_operation(self, client):
+        r = client.post("/api/v1/benchmark/study?operation=bogus&sizes=1000")
+        assert r.status_code == 400
+
+    def test_study_not_found(self, client):
+        r = client.get("/api/v1/benchmark/study/does-not-exist")
+        assert r.status_code == 404
+
+    def test_study_list_returns_recent(self, client):
+        listing = client.get("/api/v1/benchmark/study").json()
+        assert isinstance(listing, list)
+        assert all("study_id" in s and "sizes" in s for s in listing)
+
+
 class TestInspect:
     def test_inspect_csv_returns_preview(self, client, sample_csv_bytes):
         r = client.post(

@@ -180,3 +180,36 @@ class DemoJobResponse(BaseModel):
     status: str
     estimated_chunks: int
     demo: bool
+
+
+class BenchmarkStudyPoint(BaseModel):
+    rows: int
+    chunk_size: int
+    num_chunks: int = 0
+    sequential_ms: Optional[float] = None
+    distributed_ms: Optional[float] = None
+    speedup: Optional[float] = None
+    sequential_result: Optional[float] = None
+    distributed_result: Optional[float] = None
+    workers_used: int = 0
+    verified_equal: Optional[bool] = None
+    error: Optional[str] = None
+
+
+class BenchmarkStudyResponse(BaseModel):
+    study_id: str
+    status: str
+    created_at: Optional[str] = None
+    operation: str = ""
+    chunk_size: int = 0
+    sizes: list[int] = []
+    points: list[BenchmarkStudyPoint] = []
+    crossover_rows: Optional[int] = None
+    notes: list[str] = []
+    error: Optional[str] = None
+
+
+class BenchmarkStudyCreateResponse(BaseModel):
+    study_id: str
+    status: str
+    sizes: list[int]
