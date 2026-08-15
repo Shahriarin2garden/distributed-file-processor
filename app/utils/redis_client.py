@@ -1,4 +1,6 @@
 import json
+import time
+
 import redis
 from typing import Optional
 
@@ -117,6 +119,21 @@ class RedisClient:
 
     def list_benchmark_ids(self, limit: int = 50) -> list[str]:
         return self.client.zrevrange("benchmarks:index", 0, limit - 1)
+
+    # ---------- benchmark studies (workload-size sweeps) ----------
+
+    def save_study(self, study_id: str, data: dict) -> None:
+        self.client.setex(f"study:{study_id}", _BENCHMARK_TTL, json.dumps(data))
+        created_ts = float(data.get("created_at_ts") or time.time())
+        self.client.zadd("studies:index", {study_id: created_ts})
+        self.client.expire("studies:index", _BENCHMARK_TTL)
+
+    def get_study(self, study_id: str) -> Optional[dict]:
+        data = self.client.get(f"study:{study_id}")
+        return json.loads(data) if data else None
+
+    def list_study_ids(self, limit: int = 10) -> list[str]:
+        return self.client.zrevrange("studies:index", 0, limit - 1)
 
 
 redis_client = RedisClient()

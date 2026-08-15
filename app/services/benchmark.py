@@ -157,3 +157,96 @@ def run_benchmark(benchmark_id: str, rows: int, chunk_size: int, operation: str)
         })
     finally:
         redis_client.save_benchmark(benchmark_id, record)
+
+
+def run_study(study_id: str, sizes: list[int], chunk_size: int, operation: str) -> None:
+    """Sweep a set of workload sizes through the same sequential vs distributed
+    comparison and persist the measured scaling curve.
+
+    The crossover point and zone annotations are derived from the real
+    measurements, never guessed: coordination-overhead sizes (where distributed
+    is slower), the first size where distributed wins (crossover), and the
+    parallel-efficiency sizes beyond it.
+    """
+    from app.utils.redis_client import redis_client
+    column = "amount"
+    points: list[dict] = []
+
+    try:
+        for i, rows in enumerate(sizes):
+            point: dict = {"rows": rows, "chunk_size": chunk_size, "error": None}
+            try:
+                chunk_dir = os.path.join(settings.storage_path, "benchmark", f"{study_id}_{i}")
+                chunk_paths = _generate_and_chunk(rows, chunk_size, chunk_dir)
+                seq_ms, _, seq_result = _run_sequential(chunk_paths, operation, column)
+                dist_ms, _, dist_result, workers = _run_distributed(chunk_paths, operation, column)
+                point.update({
+                    "num_chunks": len(chunk_paths),
+                    "sequential_ms": round(seq_ms, 1),
+                    "distributed_ms": round(dist_ms, 1),
+                    "speedup": round(seq_ms / dist_ms, 2) if dist_ms > 0 else None,
+                    "sequential_result": seq_result,
+                    "distributed_result": dist_result,
+                    "workers_used": len(workers),
+                    "verified_equal": abs(seq_result - dist_result) < 1e-6,
+                })
+                logger.info(
+                    f"Study {study_id}: {rows} rows → seq={seq_ms:.0f}ms "
+                    f"dist={dist_ms:.0f}ms speedup={point['speedup']}"
+                )
+            except Exception as exc:
+                logger.exception(f"Study {study_id}: point {rows} failed")
+                point["error"] = type(exc).__name__ + ": " + str(exc)[:200]
+            points.append(point)
+
+        measured = [p for p in points if p.get("sequential_ms") is not None
+                    and p.get("distributed_ms") is not None]
+        crossover = next(
+            (p["rows"] for p in measured if p["distributed_ms"] <= p["sequential_ms"]),
+            None,
+        )
+        notes: list[str] = []
+        if measured:
+            worst = max(measured, key=lambda p: (p["distributed_ms"] / p["sequential_ms"]) if p["sequential_ms"] else 0)
+            if crossover is None:
+                notes.append(
+                    "Distributed overhead dominated every tested size — "
+                    f"worst ratio {worst['distributed_ms'] / worst['sequential_ms']:.2f}x slower at {worst['rows']:,} rows."
+                )
+            else:
+                notes.append(
+                    f"Coordination overhead dominates up to {crossover:,} rows (distributed slower); "
+                    "the crossover point is where distributed execution first matches sequential time."
+                )
+                notes.append(f"From {crossover:,} rows onward distributed execution is faster — the parallel efficiency zone.")
+            if all(p.get("verified_equal") for p in measured):
+                notes.append("Sequential and distributed results verified equal at every size.")
+
+        record = {
+            "status": "completed",
+            "created_at": _now_iso(),
+            "created_at_ts": _now_ts(),
+            "operation": operation,
+            "chunk_size": chunk_size,
+            "sizes": sizes,
+            "points": points,
+            "crossover_rows": crossover,
+            "notes": notes,
+            "finished_at": _now_iso(),
+        }
+    except Exception as exc:
+        logger.exception(f"Study {study_id} failed")
+        record = {
+            "status": "failed",
+            "created_at": _now_iso(),
+            "created_at_ts": _now_ts(),
+            "operation": operation,
+            "chunk_size": chunk_size,
+            "sizes": sizes,
+            "points": [],
+            "crossover_rows": None,
+            "notes": [],
+            "error": type(exc).__name__ + ": " + str(exc)[:200],
+            "finished_at": _now_iso(),
+        }
+    redis_client.save_study(study_id, record)

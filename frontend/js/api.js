@@ -54,6 +54,10 @@ export const api = {
   benchmark: (id) => req(`/api/v1/benchmark/${encodeURIComponent(id)}`),
   runBenchmark: (rows, chunkSize, operation) =>
     req(`/api/v1/benchmark${qs({ rows, chunk_size: chunkSize, operation })}`, { method: "POST" }),
+  runStudy: (sizes, chunkSize, operation) =>
+    req(`/api/v1/benchmark/study${qs({ sizes, chunk_size: chunkSize, operation })}`, { method: "POST" }),
+  study: (id) => req(`/api/v1/benchmark/study/${encodeURIComponent(id)}`),
+  studies: (limit = 5) => req(`/api/v1/benchmark/study${qs({ limit })}`),
 
   upload({ file, operation, column, filterValue, chunkSize, demoFailChunks }) {
     const fd = new FormData();
