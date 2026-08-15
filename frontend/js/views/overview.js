@@ -9,7 +9,7 @@ import { icon } from "../icons.js";
 import { StatusBadge } from "../components.js";
 import { normalizeJob } from "../model.js";
 import { formatBytes, formatNumber, timeAgo, shortNode } from "../format.js";
-import { renderGraph } from "../execgraph.js";
+import { topologyFlow } from "../schematic.js";
 
 function systemStatus(sys) {
   if (!sys) return { key: "connecting", label: "CONNECTING", iconName: "loader" };
@@ -101,25 +101,27 @@ export async function mountOverview(root) {
       ? "SYNCING…"
       : "IDLE";
 
-    // Pipeline graph — live task activity
-    const activeStatus = jobs?.find((j) => j.status === "processing")?.status
-      || jobs?.find((j) => j.status === "completed")?.status
-      || jobs?.find((j) => j.status === "failed")?.status;
-    pipeline.innerHTML = renderGraph({
-      active: activeStatus,
-      running: sys?.active_tasks ?? 0,
-      workers: workers || 0,
-      width: 700,
-      height: 240,
-    });
-
     // Stage counters — real, cluster-wide task numbers
     const completed = sys?.completed_tasks ?? 0;
     const failed = sys?.failed_tasks ?? 0;
     const active = sys?.active_tasks ?? 0;
     const dispatched = completed + failed + active;
-    const split = jobs?.reduce((a, j) => a + (j.estimated_chunks || 0), 0) ?? 0;
+    const splitChunks = jobs?.reduce((a, j) => a + (j.estimated_chunks || 0), 0) ?? 0;
     const doneJobs = jobs?.filter((j) => j.status === "completed").length ?? 0;
+    const throughput = sys?.recent_chunks_per_sec;
+
+    // Pipeline schematic — the Obsidian Flux block-flow over a dot-grid
+    pipeline.innerHTML = `<div class="sc-canvas">${topologyFlow({
+      split: formatNumber(splitChunks) + " chunks",
+      dispatch: throughput != null ? formatNumber(throughput, 1) + "/s" : "—",
+      dispatchSub: "chunks / s",
+      execute: formatNumber(active) + " active",
+      executeSub: "tasks running",
+      aggregate: formatNumber(doneJobs) + " jobs",
+      aggregateSub: "completed",
+    })}</div>`;
+
+    const split = splitChunks;
     stages.replaceChildren(h(`
       <div class="stage-strip">
         ${stageItem("Split", split + " chunks")}
@@ -134,7 +136,6 @@ export async function mountOverview(root) {
 
     // Telemetry column — three live cards
     const activeJobs = jobs?.filter((j) => j.status === "processing" || j.status === "uploaded").length ?? null;
-    const throughput = sys?.recent_chunks_per_sec;
     telemetry.replaceChildren(h(`
       <div class="tcol">
         ${tCard("Active jobs", activeJobs == null ? "—" : formatNumber(activeJobs), "queued + processing", activeJobs > 0 ? "accent" : "")}

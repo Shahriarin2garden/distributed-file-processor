@@ -1185,6 +1185,120 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 30px;
   .arch-header-right { align-items: flex-start; }
 }
 
+/* ---------- Designed block schematics (Obsidian Flux) ---------- */
+/* Dot-grid backdrop shared by topology flow and architecture schematic */
+.sc-canvas {
+  position: relative;
+  border: var(--bw) solid var(--border);
+  background-color: var(--bg);
+  background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='2' cy='2' r='1' fill='%23000000' fill-opacity='.15'/%3E%3C/svg%3E");
+  padding: 22px;
+  overflow-x: auto;
+}
+
+/* Flow: Split → Dispatch → Execute → Aggregate */
+.sc-flow {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 640px;
+}
+.sc-card {
+  flex: 1 1 128px;
+  max-width: 170px;
+  min-width: 124px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-4);
+  border: var(--bw-lg) solid var(--border);
+  box-shadow: var(--shadow-1);
+}
+.sc-card.tone-accent { background: var(--teal-bright); }
+.sc-card.tone-dash { border-style: dashed; background: var(--surface-4); }
+.sc-card-head {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 6px 8px;
+  background: var(--border); color: #ffffff;
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-bottom: var(--bw) solid var(--border);
+}
+.sc-card-body {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 12px 8px 14px;
+}
+.sc-card-icon { color: var(--text); }
+.sc-card-icon svg { width: 30px; height: 30px; }
+.sc-card-value { font-size: 15px; font-weight: 800; color: var(--text); line-height: 1.1; }
+.sc-card-sub { font-size: 9.5px; color: var(--text-2); letter-spacing: 0.06em; }
+.sc-arrow { align-self: center; color: var(--text); flex: none; }
+.sc-arrow svg { width: 26px; height: 26px; }
+.sc-live-dot {
+  width: 7px; height: 7px; flex: none;
+  background: var(--teal-bright);
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* Architecture schematic: stacked geometric layers */
+.sc-arch {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  min-width: 560px;
+}
+.sc-row { display: flex; align-items: stretch; justify-content: center; gap: 8px; width: 100%; }
+.sc-down { transform: rotate(90deg); color: var(--text); }
+.sc-down svg { width: 26px; height: 26px; }
+.sc-block {
+  flex: 1 1 0;
+  min-width: 150px;
+  display: flex; flex-direction: column;
+  background: var(--surface-4);
+  border: var(--bw-lg) solid var(--border);
+  box-shadow: var(--shadow-1);
+}
+.sc-block.tone-teal { background: var(--surface-4); }
+.sc-block.tone-magenta { background: var(--magenta); }
+.sc-block.tone-black { background: var(--surface-4); }
+.sc-block.tone-teal-bright { background: var(--teal-bright); }
+.sc-block-body {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 10px 14px;
+}
+.sc-icon { color: var(--text); }
+.sc-icon svg { width: 20px; height: 20px; }
+.sc-label { font-size: 10px; color: var(--text-2); letter-spacing: 0.04em; display: inline-flex; align-items: center; gap: 4px; }
+.sc-label svg { width: 12px; height: 12px; }
+.sc-orch { min-width: 300px; }
+.sc-orch-body { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 12px 14px; }
+.sc-sub {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 8px 8px 9px;
+  background: var(--surface);
+  border: var(--bw) solid var(--border);
+  box-shadow: var(--shadow-xs);
+}
+.sc-sub-title { font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; color: var(--text); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.sc-sub-title svg { width: 14px; height: 14px; }
+.sc-sub-detail { font-size: 9px; color: var(--text-3); line-height: 1.5; }
+.sc-chip-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+.sc-chip {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+  padding: 3px 7px;
+  border: var(--bw) solid var(--border);
+  background: var(--surface); color: var(--text-2);
+  box-shadow: var(--shadow-xs);
+}
+
+@media (max-width: 900px) {
+  .sc-orch-body { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sc-live-dot { animation: none; }
+}
+
 /* ---------- Q&A / decisions ---------- */
 .qa-list { display: flex; flex-direction: column; gap: 8px; }
 .qa { border: var(--bw) solid var(--border); background: var(--surface); box-shadow: var(--shadow-xs); }

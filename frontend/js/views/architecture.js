@@ -6,7 +6,7 @@
 import { h, clear, on } from "../dom.js";
 import { icon } from "../icons.js";
 import { Panel } from "../components.js";
-import { renderGraph } from "../execgraph.js";
+import { archSchematic } from "../schematic.js";
 import { store } from "../store.js";
 import { timeAgo } from "../format.js";
 
@@ -287,7 +287,10 @@ export async function mountArchitecture(root) {
     syncedEl.textContent = store.lastSystemAt
       ? `LAST SYNCED: ${timeAgo(new Date(store.lastSystemAt).toISOString())}`
       : "LAST SYNCED: —";
-    flowEl.innerHTML = renderGraph({ width: 700, height: 250, workers: Math.max(1, workers) });
+    flowEl.innerHTML = `<div class="sc-canvas">${archSchematic({
+      workers,
+      rayUp: !!(sys?.ray_initialized),
+    })}</div>`;
   };
 
   const renderDetail = (id) => {
