@@ -21,10 +21,10 @@ services:
       - ray-net
     healthcheck:
       test: ["CMD", "ray", "status"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+      interval: 15s
+      timeout: 20s
+      retries: 6
+      start_period: 30s
 
   # ── Ray workers ──────────────────────────────────────────────────────────
   ray-worker:
@@ -72,6 +72,7 @@ services:
       - CHUNK_SIZE_ROWS=50000
       - MAX_CONCURRENT_TASKS=8
       - MAX_FILE_SIZE_MB=500
+      - DEMO_MODE=true
       - ALLOWED_ORIGINS=*
       # Uncomment and set in production:
       # - API_KEY_SECRET=changeme
