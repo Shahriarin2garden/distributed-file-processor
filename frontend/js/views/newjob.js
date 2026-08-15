@@ -1,64 +1,63 @@
-// New-job wizard: INPUT → OPERATION → EXECUTION → REVIEW.
+// New-job wizard — mirrors the Obsidian Flux "New Job Wizard" screen:
+// header/tracker card (ID + DRAFT + step progress bar), a big bordered
+// dropzone over an animated grid, an inspection panel that replaces the
+// dropzone after selection, a Quick Config sidebar (operation tiles +
+// target column), and a sticky action bar.
 // Every estimate comes from the real /inspect response; column types are
 // inferred from the returned sample, never fabricated.
 
 import { store } from "../store.js";
 import { api } from "../api.js";
-import { h, clear, on } from "../dom.js";
+import { h, clear } from "../dom.js";
 import { icon } from "../icons.js";
-import { SectionTitle } from "../components.js";
 import { formatBytes, formatNumber } from "../format.js";
 
 const STEPS = [
-  { id: "input", label: "INPUT" },
-  { id: "operation", label: "OPERATION" },
-  { id: "settings", label: "EXECUTION" },
-  { id: "review", label: "REVIEW" },
+  { id: "upload", label: "UPLOAD" },
+  { id: "config", label: "CONFIG" },
+  { id: "inspect", label: "INSPECT" },
+  { id: "run", label: "RUN" },
 ];
 
 const OPS = [
-  {
-    id: "sum", label: "Sum", symbol: "Σ", icon: "sigma",
-    sub: "Distributed numeric aggregation",
-    algo: "Each worker returns the partial total of its chunk. The aggregator sums the partials — order-independent and exact.",
-  },
-  {
-    id: "mean", label: "Mean", symbol: "μ", icon: "gauge",
-    sub: "Weighted distributed average",
-    algo: "Workers return (sum, count). The aggregator combines both values — this avoids chunk-size bias when the last chunk is smaller than the rest.",
-  },
-  {
-    id: "filter", label: "Filter", symbol: "⌕", icon: "filter",
-    sub: "Distributed conditional count",
-    algo: "Each worker counts rows where the column equals the target value. The aggregator sums the per-chunk counts into the total.",
-  },
+  { id: "sum", label: "SUM", sub: "numeric total", icon: "sigma" },
+  { id: "mean", label: "MEAN", sub: "weighted avg", icon: "gauge" },
+  { id: "filter", label: "FILTER", sub: "conditional count", icon: "filter" },
 ];
 
 export async function mountNewJob(root) {
   clear(root);
   root.appendChild(h(`
     <div class="page">
-      ${SectionTitle({
-        kicker: "NEW JOB",
-        title: "Distribute a file",
-        sub: "Four steps from raw file to aggregated result.",
-      })}
-      <div class="wizard-steps" role="tablist" aria-label="Wizard steps">
-        ${STEPS.map((s, i) => `
-          <button type="button" class="wizard-step" data-step="${s.id}" role="tab" aria-selected="${i === 0}">
-            <span class="wizard-step-num">0${i + 1}</span>
-            <span>${s.label}</span>
-          </button>`).join("")}
-      </div>
-      <div class="panel">
-        <div class="panel-body" id="wizard-body"></div>
-        <div class="wizard-nav">
-          <button class="btn btn-ghost" id="wz-back" disabled>${icon("arrowLeft", 13)} Back</button>
-          <div class="wizard-nav-right">
-            <span class="mono xs" id="wz-status"></span>
-            <button class="btn btn-ghost" id="wz-next">Next ${icon("arrowRight", 13)}</button>
-            <button class="btn btn-primary" id="wz-run" hidden>${icon("play", 13)} Start distributed job</button>
+      <!-- Header / tracker -->
+      <div class="nj-header">
+        <div class="nj-header-top">
+          <h1 class="nj-title">New Job</h1>
+          <div class="nj-badges">
+            <span class="nj-badge-dark mono" id="nj-id">ID: —</span>
+            <span class="nj-badge mono">DRAFT</span>
           </div>
+        </div>
+        <div class="nj-track">
+          <div class="nj-track-bar" aria-hidden="true"><div class="nj-track-fill" id="nj-fill"></div></div>
+          <div class="nj-track-labels mono" id="nj-labels">
+            ${STEPS.map((s, i) => `<span class="nj-track-step" data-i="${i}">0${i + 1}_${s.label}</span>`).join("")}
+          </div>
+        </div>
+      </div>
+
+      <!-- Wizard stage -->
+      <div class="nj-stage">
+        <div class="nj-stage-body" id="wizard-body"></div>
+      </div>
+
+      <!-- Sticky action bar -->
+      <div class="nj-actions">
+        <button class="btn btn-ghost" id="wz-back" disabled>${icon("arrowLeft", 13)} Back</button>
+        <div class="nj-actions-right">
+          <span class="mono xs" id="wz-status"></span>
+          <button class="btn btn-ghost" id="wz-next">Next Step ${icon("arrowRight", 13)}</button>
+          <button class="btn btn-primary" id="wz-run" hidden>${icon("play", 13)} Start distributed job</button>
         </div>
       </div>
     </div>
@@ -84,26 +83,28 @@ export async function mountNewJob(root) {
   const backBtn = root.querySelector("#wz-back");
   const runBtn = root.querySelector("#wz-run");
   const statusEl = root.querySelector("#wz-status");
-  const steps = [...root.querySelectorAll(".wizard-step")];
+  const fillEl = root.querySelector("#nj-fill");
+  const trackSteps = [...root.querySelectorAll(".nj-track-step")];
 
   const stepValidation = {
-    input: () => !!state.file,
-    operation: () => {
+    upload: () => {
+      if (!state.file) return false;
       if (!state.operation) return false;
       if ((state.operation === "sum" || state.operation === "mean") && !state.column) return false;
       if (state.operation === "filter" && (!state.column || !state.filterValue)) return false;
       return true;
     },
-    settings: () => state.chunkSize >= 1000,
-    review: () => true,
+    config: () => state.chunkSize >= 1000,
+    inspect: () => !!state.inspection,
+    run: () => true,
   };
 
   const updateNav = () => {
-    steps.forEach((s, i) => {
+    trackSteps.forEach((s, i) => {
       s.classList.toggle("active", i === state.step);
       s.classList.toggle("done", i < state.step);
-      s.setAttribute("aria-selected", String(i === state.step));
     });
+    fillEl.style.width = `${((state.step + 1) / STEPS.length) * 100}%`;
     nextBtn.hidden = state.step === STEPS.length - 1;
     runBtn.hidden = state.step !== STEPS.length - 1;
     backBtn.disabled = state.step === 0;
@@ -115,27 +116,73 @@ export async function mountNewJob(root) {
   const renderStep = async () => {
     const id = STEPS[state.step].id;
     body.replaceChildren();
-    if (id === "input") body.appendChild(renderInput());
-    if (id === "operation") body.appendChild(renderOperation());
-    if (id === "settings") body.appendChild(renderSettings());
-    if (id === "review") body.appendChild(renderReview());
+    if (id === "upload") body.appendChild(renderUpload());
+    if (id === "config") body.appendChild(renderConfig());
+    if (id === "inspect") body.appendChild(renderInspect());
+    if (id === "run") body.appendChild(renderRun());
     updateNav();
-    if (id === "review") await inspectIfNeeded();
+    if (id === "inspect" || id === "run") await inspectIfNeeded();
   };
 
-  const renderInput = () => {
+  const renderUpload = () => {
+    const cols = state.inspection?.columns || [];
     const el = h(`
-      <div class="wizard-step-body">
-        <label class="dropzone" id="dz">
-          <input type="file" id="file-input" accept=".csv,.json,.jsonl" hidden />
-          <span class="dropzone-icon">${icon("upload", 22)}</span>
-          <div>
-            <div class="dropzone-title">Drop a CSV or JSON file here</div>
-            <div class="dropzone-sub">or click to browse · processed in parallel chunks over Ray</div>
+      <div class="nj-upload-grid">
+        <div class="nj-upload-main">
+          <label class="nj-dropzone" id="dz" ${state.file ? "hidden" : ""}>
+            <input type="file" id="file-input" accept=".csv,.json,.jsonl" hidden />
+            <span class="nj-dz-iconbox" aria-hidden="true">${icon("upload", 44)}</span>
+            <h2 class="nj-dz-title">Drop telemetry data</h2>
+            <p class="nj-dz-sub">CSV, JSON, or JSON Lines accepted. Files are split into row-bounded chunks and processed in parallel over Ray.</p>
+            <span class="nj-dz-btn">Select File</span>
+          </label>
+
+          <div class="nj-inspect" id="inspect-panel" ${state.file ? "" : "hidden"}>
+            <div class="nj-inspect-head">
+              <span class="nj-inspect-file mono">> ${state.fileName ? esc(state.fileName) : "—"}</span>
+              <span class="nj-inspect-badge mono">${state.inspection ? formatNumber(state.inspection.row_count) : "—"} ROWS LOADED</span>
+            </div>
+            <div id="inspect-table"></div>
           </div>
-        </label>
-        <div id="inspect-result"></div>
+        </div>
+
+        <aside class="nj-qc">
+          <div class="nj-qc-head">
+            <span>Quick Config</span>
+            <span class="nj-qc-icon" aria-hidden="true">${icon("settings", 15)}</span>
+          </div>
+          <div class="nj-qc-body">
+            <label class="nj-field-label" for="qc-column">Target Column</label>
+            <div class="nj-select-wrap">
+              <select id="qc-column" class="nj-select mono" ${cols.length ? "" : "disabled"}>
+                <option value="">Select column…</option>
+                ${cols.map((c) => `<option value="${escAttr(c)}" ${state.column === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+              </select>
+              <span class="nj-select-caret" aria-hidden="true">${icon("chevronDown", 14)}</span>
+            </div>
+
+            <label class="nj-field-label">Operation</label>
+            <div class="nj-op-tiles">
+              ${OPS.map((o) => `
+                <label class="nj-op-tile${state.operation === o.id ? " active" : ""}" data-op="${o.id}">
+                  <input type="radio" name="nj-operation" value="${o.id}" ${state.operation === o.id ? "checked" : ""} class="nj-op-radio" />
+                  <span class="nj-op-tile-inner mono">${o.label}</span>
+                </label>`).join("")}
+            </div>
+
+            <div class="nj-filter-row" id="qc-filter-row" ${state.operation === "filter" ? "" : "hidden"}>
+              <label class="nj-field-label" for="qc-filter">Filter value</label>
+              <input class="nj-input mono" id="qc-filter" value="${escAttr(state.filterValue)}" placeholder="e.g. alpha" />
+            </div>
+
+            <div class="nj-note">
+              ${icon("info", 14)}
+              <span>Advanced configuration is available in Step 02 after file validation.</span>
+            </div>
+          </div>
+        </aside>
       </div>`);
+
     const input = el.querySelector("#file-input");
     input.addEventListener("change", () => {
       const f = input.files && input.files[0];
@@ -150,6 +197,22 @@ export async function mountNewJob(root) {
       const f = e.dataTransfer.files && e.dataTransfer.files[0];
       if (f) setFile(f);
     });
+
+    const colSel = el.querySelector("#qc-column");
+    colSel.addEventListener("change", () => { state.column = colSel.value; updateNav(); });
+
+    const opTiles = [...el.querySelectorAll(".nj-op-tile")];
+    opTiles.forEach((t) => t.addEventListener("click", () => {
+      state.operation = t.dataset.op;
+      t.querySelector("input").checked = true;
+      opTiles.forEach((x) => x.classList.toggle("active", x === t));
+      el.querySelector("#qc-filter-row").hidden = state.operation !== "filter";
+      updateNav();
+    }));
+
+    el.querySelector("#qc-filter").addEventListener("input", (e) => { state.filterValue = e.target.value; updateNav(); });
+
+    if (state.inspection) renderInspectTable(el.querySelector("#inspect-table"));
     return el;
   };
 
@@ -173,101 +236,52 @@ export async function mountNewJob(root) {
     return "string";
   };
 
-  const renderInspected = () => {
+  const renderInspectTable = (box) => {
     const insp = state.inspection;
-    const box = body.querySelector("#inspect-result") || body.querySelector("#run-state");
     if (!insp) return;
     const cols = (insp.columns || []).map((c) => ({
       name: c,
       type: inferType((insp.sample || []).map((r) => r[c]).find((v) => v !== undefined && v !== null && v !== "")) || "string",
     }));
     const sample = (insp.sample || []).slice(0, 5);
-    const preview = sample.length && cols.length ? `
-      <div class="preview">
-        <div class="preview-head">Sample preview <span class="mono xs dim">first ${sample.length} rows</span></div>
-        <div class="table-scroll"><table class="table">
-          <thead><tr>${cols.map((c) => `<th>${esc(c.name)} <span class="type-tag">${c.type}</span></th>`).join("")}</tr></thead>
-          <tbody>${sample.map((row) => `<tr>${cols.map((c) => `<td class="mono">${esc(row[c] ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody>
-        </table></div>
-      </div>` : "";
+    if (!cols.length) {
+      box.innerHTML = `<div class="nj-inspect-empty mono">no columns detected</div>`;
+      return;
+    }
     box.innerHTML = `
-      <div class="inspected">
-        <span class="inspected-head">
-          <span class="file-badge ext-${state.fileExtension.toLowerCase()}">${state.fileExtension.toUpperCase()}</span>
-          <span class="mono">${esc(state.fileName)}</span>
-          <span class="mono xs dim">${formatBytes(state.fileSize)}</span>
-        </span>
-        <div class="inspected-stats mono">
-          <span>${formatNumber(insp.row_count)} rows</span>
-          <span>${formatNumber(insp.estimated_chunks)} chunks @ ${formatNumber(state.chunkSize)} rows</span>
-          <span>${cols.length} columns</span>
-        </div>
-        <div class="inspected-cols">
-          ${cols.map((c) => `<span class="col-pill"><code>${esc(c.name)}</code><em>${c.type}</em></span>`).join("")}
-        </div>
-        <div class="inspected-valid"><span class="dot on"></span>validation passed — ready to distribute</div>
-        ${preview}
-      </div>`;
+      <div class="table-scroll"><table class="table nj-inspect-table">
+        <thead><tr>${cols.map((c) => `<th>${esc(c.name)} <span class="type-tag">${c.type}</span></th>`).join("")}</tr></thead>
+        <tbody>${sample.map((row) => `<tr>${cols.map((c) => `<td class="mono">${esc(row[c] ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table></div>`;
   };
 
-  const renderOperation = () => {
+  const renderInspect = () => {
+    const insp = state.inspection;
     const el = h(`
       <div class="wizard-step-body">
-        <div class="op-grid">
-          ${OPS.map((c) => `
-            <button type="button" class="op-card${state.operation === c.id ? " active" : ""}" data-op="${c.id}">
-              <span class="op-symbol mono">${c.symbol}</span>
-              <span class="op-name">${c.label}</span>
-              <span class="op-sub">${c.sub}</span>
-            </button>`).join("")}
+        <div class="nj-inspect" style="display:block">
+          <div class="nj-inspect-head">
+            <span class="nj-inspect-file mono">> ${state.fileName ? esc(state.fileName) : "—"}</span>
+            <span class="nj-inspect-badge mono">${insp ? formatNumber(insp.row_count) : "—"} ROWS LOADED</span>
+          </div>
+          <div id="inspect-full"></div>
         </div>
-        <div class="op-algo" id="op-algo"></div>
-        <div class="form-row">
-          <label class="field">
-            <span class="field-label">Target column</span>
-            <input class="input mono" id="op-column" list="col-hints" placeholder="e.g. value" value="${escAttr(state.column)}" />
-            <datalist id="col-hints"></datalist>
-          </label>
-        </div>
-        <div class="form-row" id="filter-row" hidden>
-          <label class="field">
-            <span class="field-label">Filter value</span>
-            <input class="input mono" id="op-filter" placeholder="e.g. alpha" value="${escAttr(state.filterValue)}" />
-            <span class="field-hint">Rows where the column equals this value are counted.</span>
-          </label>
-        </div>
+        <div class="inspected-cols" id="inspect-cols"></div>
+        <div class="inspected-valid"><span class="dot on"></span>validation passed — ready to distribute</div>
       </div>`);
-
-    const opBtns = [...el.querySelectorAll(".op-card")];
-    const opAlgo = el.querySelector("#op-algo");
-    const updateAlgo = () => {
-      const c = OPS.find((x) => x.id === state.operation);
-      opAlgo.innerHTML = c ? `<div class="op-algo-inner">${icon("info", 14)}<span><b>${c.label}.</b> ${c.algo}</span></div>` : "";
-    };
-    opBtns.forEach((b) => b.addEventListener("click", () => {
-      state.operation = b.dataset.op;
-      opBtns.forEach((x) => x.classList.toggle("active", x === b));
-      el.querySelector("#filter-row").hidden = state.operation !== "filter";
-      syncColumns();
-      updateAlgo();
-      updateNav();
-    }));
-    el.querySelector("#filter-row").hidden = state.operation !== "filter";
-    updateAlgo();
-    const colInput = el.querySelector("#op-column");
-    colInput.addEventListener("input", () => { state.column = colInput.value; updateNav(); });
-    el.querySelector("#op-filter").addEventListener("input", (e) => { state.filterValue = e.target.value; updateNav(); });
-
-    const syncColumns = () => {
-      const dl = el.querySelector("#col-hints");
-      dl.replaceChildren();
-      (state.inspection?.columns || []).forEach((c) => dl.appendChild(h(`<option value="${escAttr(c)}"></option>`)));
-    };
-    syncColumns();
+    if (insp) {
+      renderInspectTable(el.querySelector("#inspect-full"));
+      const cols = (insp.columns || []).map((c) => ({
+        name: c,
+        type: inferType((insp.sample || []).map((r) => r[c]).find((v) => v !== undefined && v !== null && v !== "")) || "string",
+      }));
+      el.querySelector("#inspect-cols").innerHTML = cols
+        .map((c) => `<span class="col-pill"><code>${esc(c.name)}</code><em>${c.type}</em></span>`).join("");
+    }
     return el;
   };
 
-  const renderSettings = () => {
+  const renderConfig = () => {
     const demo = store.demoMode;
     const el = h(`
       <div class="wizard-step-body">
@@ -316,7 +330,7 @@ export async function mountNewJob(root) {
     return el;
   };
 
-  const renderReview = () => {
+  const renderRun = () => {
     const insp = state.inspection;
     const concurrency = store.system?.max_concurrent_tasks ?? "—";
     const rows = [
@@ -331,6 +345,7 @@ export async function mountNewJob(root) {
     if (store.demoMode) rows.push(["Fault injection", state.demoArmed ? "chunk 1" : "off"]);
     const el = h(`
       <div class="wizard-step-body">
+        <div class="section-label">Review & launch</div>
         <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd class="mono">${v}</dd>`).join("")}</dl>
         <div class="run-state" id="run-state"></div>
       </div>`);
@@ -344,7 +359,14 @@ export async function mountNewJob(root) {
     try {
       const insp = await api.inspect(state.file, state.chunkSize);
       state.inspection = insp;
-      renderInspected();
+      const uploadActive = STEPS[state.step].id === "upload";
+      if (uploadActive) {
+        body.replaceChildren();
+        renderStep();
+      } else {
+        body.replaceChildren();
+        renderStep();
+      }
     } catch (err) {
       statusEl.textContent = err.message || "inspection unavailable";
     } finally {

@@ -502,31 +502,228 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 30px;
 .empty-title { font-size: 14px; font-weight: 700; color: var(--text-2); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.06em; }
 .empty-body { font-size: 12.5px; color: var(--text-3); max-width: 380px; }
 
-/* ---------- Wizard ---------- */
-.wizard-steps { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
-.wizard-step {
-  flex: 1; display: flex; align-items: center; gap: 8px;
-  padding: 10px 12px;
-  border: var(--bw) solid var(--border);
+/* ---------- New Job Wizard (Obsidian Flux "New Job Wizard") ---------- */
+.nj-header {
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 20px;
+  border: var(--bw-lg) solid var(--border);
   background: var(--surface);
-  font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--text-3); cursor: pointer;
-  transition: border-color 0.12s var(--ease), color 0.12s var(--ease), background 0.12s var(--ease);
+  box-shadow: var(--shadow-2);
+  margin-bottom: 20px;
 }
-.wizard-step-num {
-  width: 20px; height: 20px; display: grid; place-items: center;
-  font-family: var(--mono); font-size: 10px; border: 1px solid var(--border); color: var(--text-3);
-  flex: none;
+.nj-header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.nj-title {
+  margin: 0;
+  font-family: var(--sans); font-weight: 900; font-size: 30px; letter-spacing: -0.02em;
+  text-transform: uppercase; color: var(--text);
 }
-.wizard-step.active { border-color: var(--border); color: #ffffff; background: var(--accent); }
-.wizard-step.active .wizard-step-num { border-color: var(--border); color: #ffffff; background: var(--accent); }
-.wizard-step.done .wizard-step-num { background: var(--ok-fill); border-color: var(--border); color: var(--ok-ink); }
-.wizard-nav {
+.nj-badges { display: flex; align-items: center; gap: 8px; }
+.nj-badge-dark {
+  padding: 4px 10px;
+  background: var(--border); color: #ffffff;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+}
+.nj-badge {
+  padding: 4px 10px;
+  background: var(--surface-4); color: var(--text-2);
+  border: var(--bw) solid var(--border);
+  box-shadow: var(--shadow-xs);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+}
+.nj-track { display: flex; flex-direction: column; gap: 8px; }
+.nj-track-bar {
+  height: 10px; width: 100%;
+  background: var(--border);
+  overflow: hidden;
+}
+.nj-track-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s var(--ease);
+}
+.nj-track-labels {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.nj-track-step { color: var(--text-3); opacity: 0.55; transition: opacity 0.15s var(--ease), color 0.15s var(--ease); }
+.nj-track-step.active { color: var(--accent); opacity: 1; }
+.nj-track-step.done { color: var(--text-2); opacity: 0.85; }
+
+.nj-stage {
+  border: var(--bw-lg) solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+.nj-stage-body { padding: 20px; }
+
+/* Sticky action bar (like the Stitch bottom bar) */
+.nj-actions {
+  position: sticky; bottom: 0; z-index: 30;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 14px 16px;
-  border-top: var(--bw) solid var(--border);
+  padding: 14px 20px;
+  background: var(--surface);
+  border-top: var(--bw-lg) solid var(--border);
+  box-shadow: 0 -4px 0 0 rgba(0, 0, 0, 0.08);
+  margin: 0 -1px -1px;
 }
-.wizard-nav-right { display: flex; align-items: center; gap: 10px; }
+.nj-actions-right { display: flex; align-items: center; gap: 10px; }
+
+/* Upload grid: main dropzone (8) + Quick Config (4) */
+.nj-upload-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start; }
+.nj-upload-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* Dropzone — big bordered card over an animated grid */
+.nj-dropzone {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  min-height: 360px;
+  padding: 28px;
+  background: var(--surface);
+  border: var(--bw-lg) solid var(--border);
+  box-shadow: var(--shadow-2);
+  cursor: pointer;
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), background 0.15s var(--ease);
+}
+.nj-dropzone::before {
+  content: "";
+  position: absolute; inset: 0; z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40 0H0v40' fill='none' stroke='%23000000' stroke-width='1'/%3E%3C/svg%3E");
+  opacity: 0.12; pointer-events: none;
+}
+.nj-dropzone:hover, .nj-dropzone.over {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--shadow-2);
+  background: var(--surface-2);
+}
+.nj-dropzone > * { position: relative; z-index: 1; }
+.nj-dz-iconbox {
+  width: 88px; height: 88px;
+  display: grid; place-items: center;
+  background: var(--surface-3);
+  border: var(--bw-lg) solid var(--border);
+  box-shadow: var(--shadow-1);
+  color: var(--text);
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+.nj-dropzone:hover .nj-dz-iconbox { background: var(--accent); color: #ffffff; }
+.nj-dz-iconbox svg { width: 44px; height: 44px; }
+.nj-dz-title { margin: 0; font-size: 19px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.01em; color: var(--text); text-align: center; }
+.nj-dz-sub { margin: 0; max-width: 460px; text-align: center; font-size: 12.5px; color: var(--text-3); line-height: 1.6; }
+.nj-dz-btn {
+  display: inline-block;
+  padding: 10px 20px;
+  background: var(--border); color: #ffffff;
+  border: 2px solid var(--border);
+  font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  box-shadow: var(--shadow-1);
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease), box-shadow 0.1s var(--ease);
+}
+.nj-dropzone:hover .nj-dz-btn { background: var(--accent); }
+.nj-dz-btn:active { transform: translate(2px, 2px); box-shadow: none; }
+
+/* Inspection panel — replaces the dropzone after selection */
+.nj-inspect {
+  border: var(--bw-lg) solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+.nj-inspect-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 14px;
+  background: var(--border); color: #ffffff;
+}
+.nj-inspect-file { font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nj-inspect-badge {
+  flex: none;
+  padding: 3px 8px;
+  background: var(--accent); color: #ffffff;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+}
+.nj-inspect-table { font-size: 11.5px; }
+.nj-inspect-empty { padding: 14px; color: var(--text-3); font-size: 12px; }
+
+/* Quick Config sidebar */
+.nj-qc {
+  border: var(--bw-lg) solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  display: flex; flex-direction: column;
+}
+.nj-qc-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 14px;
+  background: var(--border); color: #ffffff;
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+}
+.nj-qc-icon svg { width: 15px; height: 15px; }
+.nj-qc-body { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+.nj-field-label { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); }
+.nj-select-wrap { position: relative; }
+.nj-select {
+  width: 100%;
+  appearance: none; -webkit-appearance: none;
+  padding: 9px 30px 9px 10px;
+  background: var(--surface);
+  border: var(--bw) solid var(--border);
+  box-shadow: var(--shadow-xs);
+  font-size: 12px; color: var(--text);
+  border-radius: 0;
+  cursor: pointer;
+}
+.nj-select:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+.nj-select-caret {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--text); pointer-events: none; display: grid; place-items: center;
+}
+.nj-select-caret svg { width: 14px; height: 14px; }
+
+.nj-op-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.nj-op-tile { cursor: pointer; }
+.nj-op-radio { position: absolute; opacity: 0; pointer-events: none; }
+.nj-op-tile-inner {
+  display: block;
+  padding: 10px 8px; text-align: center;
+  background: var(--surface);
+  border: var(--bw) solid var(--border);
+  box-shadow: var(--shadow-xs);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  color: var(--text);
+  transition: background 0.12s var(--ease), color 0.12s var(--ease), transform 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+.nj-op-tile:hover .nj-op-tile-inner { background: var(--surface-3); }
+.nj-op-tile.active .nj-op-tile-inner {
+  background: var(--accent); color: #ffffff;
+  transform: translate(2px, 2px); box-shadow: none;
+}
+
+.nj-filter-row { display: flex; flex-direction: column; gap: 6px; }
+.nj-input {
+  padding: 9px 10px;
+  background: var(--surface);
+  border: var(--bw) solid var(--border);
+  box-shadow: var(--shadow-xs);
+  font-size: 12px; color: var(--text);
+  border-radius: 0;
+}
+.nj-input:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.nj-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin-top: 4px;
+  padding: 10px;
+  background: var(--surface-3);
+  border: var(--bw) solid var(--border);
+  color: var(--text-3);
+}
+.nj-note svg { width: 14px; height: 14px; flex: none; margin-top: 1px; color: var(--accent); }
+.nj-note span { font-size: 11px; line-height: 1.5; }
+
+.wizard-step-body { display: flex; flex-direction: column; gap: 16px; }
+
+@media (max-width: 1000px) {
+  .nj-upload-grid { grid-template-columns: 1fr; }
+}
 
 /* Drop zone */
 .dropzone {
