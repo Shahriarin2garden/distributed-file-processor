@@ -51,3 +51,8 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# opencode local config (contains API keys — never commit)
+opencode.json
+opencode.jsonc
+.opencode/
