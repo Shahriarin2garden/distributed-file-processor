@@ -147,8 +147,9 @@ class SystemResponse(BaseModel):
     failed_tasks: int
     total_retries: int
     recent_avg_duration_ms: Optional[float]
-    recent_throughput_jobs_per_min: Optional[float]
+    recent_chunks_per_sec: Optional[float]
     workers_online: int
+    max_concurrent_tasks: int = 8
 
 
 class BenchmarkResponse(BaseModel):

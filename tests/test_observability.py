@@ -41,6 +41,8 @@ class TestSystemEndpoint:
         assert isinstance(data["available_cpus"], (int, float))
         assert "active_jobs" in data and "queued_jobs" in data
         assert "workers_online" in data
+        assert "max_concurrent_tasks" in data
+        assert "recent_chunks_per_sec" in data
 
     def test_system_counts_jobs(self, client, sample_csv_bytes):
         r = client.post(

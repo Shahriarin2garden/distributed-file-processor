@@ -47,10 +47,12 @@ def _collect_cluster() -> list[NodeInfo]:
         return nodes
     for n in raw_nodes:
         alive = bool(n.get("Alive", False))
-        node_id = str(n.get("NodeID", "")) or "unknown"
+        raw_id = n.get("NodeID", "") or ""
+        if isinstance(raw_id, bytes):
+            raw_id = raw_id.hex()
+        node_id = str(raw_id) or "unknown"
         hostname = (
             n.get("NodeManagerHostname")
-            or n.get("NodeManagerAddress")
             or n.get("NodeManagerAddress")
             or ""
         )
@@ -59,7 +61,10 @@ def _collect_cluster() -> list[NodeInfo]:
             alive=alive,
             hostname=str(hostname),
             resources=_norm_resources(n.get("Resources", {})),
-            available_resources=_norm_resources(n.get("Resources", {})),
+            # Ray does not expose per-node available resources through
+            # ray.nodes(); leave empty so the UI shows "unavailable" instead
+            # of fabricated numbers.
+            available_resources={},
         ))
     return nodes
 
@@ -119,7 +124,7 @@ def _job_telemetry() -> dict:
         "failed_tasks": failed_tasks,
         "total_retries": retries,
         "recent_avg_duration_ms": avg_duration,
-        "recent_throughput_jobs_per_min": throughput,
+        "recent_chunks_per_sec": throughput,
     }
 
 
@@ -167,5 +172,6 @@ async def system_info() -> SystemResponse:
         total_memory_gb=total_memory_gb,
         available_memory_gb=available_memory_gb,
         workers_online=workers_online,
+        max_concurrent_tasks=settings.max_concurrent_tasks,
         **telemetry,
     )
