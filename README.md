@@ -2,16 +2,24 @@
 
 > **Split. Dispatch. Execute. Aggregate.**
 
-A distributed file processing control plane built with Ray, FastAPI, and Redis. Accepts CSV or JSON uploads, splits them into configurable chunks, processes each chunk in parallel across Ray workers, and returns aggregated results. A dark, observability-style web UI — served directly by FastAPI — shows live cluster telemetry, per-chunk task traces, event logs, benchmark comparisons, and fault-injection demos, all rendered from real backend state (no fake metrics).
+A production-grade distributed file processing control plane built on **Ray**, **FastAPI**, and **Redis**. Upload CSV or JSON files, split them into configurable row-bounded chunks, process each chunk in parallel across a Ray cluster, and read back the aggregated result — all through a dark, observability-style web UI served directly by FastAPI.
+
+The entire UI is rendered from **real backend state only** — live cluster telemetry, per-chunk task traces, event logs, benchmark comparisons, and fault-injection recovery demos. No fake metrics.
+
+![Overview](docs/screenshots/overview.png)
+
+---
 
 ## Table of Contents
 
+- [Key Features](#key-features)
 - [Architecture](#architecture)
+- [UI Screens](#ui-screens)
 - [Tech Stack](#tech-stack)
-- [Features](#features)
 - [Project Structure](#project-structure)
 - [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
+- [Quick Start (Development)](#quick-start-development)
+- [Production Deployment](#production-deployment)
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
 - [Running Tests](#running-tests)
@@ -22,75 +30,11 @@ A distributed file processing control plane built with Ray, FastAPI, and Redis. 
 
 ---
 
-## Architecture
-
-```text
-Control plane UI (vanilla SPA, served by FastAPI at /)
-   |
-   v
-FastAPI  (port 8000)
-   |
-   |-- POST /api/v1/upload           Store file, create job record in Redis
-   |-- POST /api/v1/inspect          Preview a file before submitting
-   |-- POST /api/v1/process/{id}     Dispatch background orchestration task
-   |-- GET  /api/v1/status/{id}      Poll progress (0-100%) from Redis
-   |-- GET  /api/v1/result/{id}      Retrieve aggregated result from Redis
-   |-- GET  /api/v1/jobs             Job history + filters
-   |-- GET  /api/v1/jobs/{id}        Job detail: tasks + event log
-   |-- GET  /api/v1/system           Cluster + task telemetry
-   |-- POST /api/v1/benchmark        Real sequential-vs-distributed benchmark
-   |-- POST /api/v1/demo/fault       Gated worker-failure demo (DEMO_MODE)
-   |
-   v
-Orchestrator (background task)
-   |
-   |-- ChunkerService               Split file into N row-bounded CSV chunks
-   |-- Ray remote tasks (parallel)  process_chunk() runs on each chunk
-   |-- ResultAggregator (actor)     Collects partial results, computes final value
-   |
-   v
-Redis (port 6379)                  Job metadata, chunk lists, results (24 h TTL),
-                                   job index, task records, event log, benchmarks
-Ray Head (port 8265 dashboard, 10001 client)
-Ray Workers (2 replicas by default)
-Local filesystem / S3 (configurable)
-```
-
-### Processing flow for a single job
-
-1. The UI (or a client) uploads a file with an operation (`sum`, `mean`, or `filter`) and a target column.
-2. The file is saved to local storage (or S3). A UUID job ID is returned immediately and indexed in Redis.
-3. Processing is triggered from the wizard (or via `POST /process/{job_id}`). The orchestrator runs as a FastAPI background task.
-4. The file is split into equal-sized chunks (default 50 000 rows each).
-5. One Ray remote task is dispatched per chunk, subject to a `MAX_CONCURRENT_TASKS` concurrency window. Each dispatch writes a task record and an event to Redis.
-6. As each task completes, `ray.wait()` collects the result and forwards it to the `ResultAggregator` actor.
-7. Redis is updated with the progress percentage after each completed chunk; the event log records dispatch, completion, retry, and failure events.
-8. Once all chunks are done, the aggregator returns the final value and the job status is set to `completed`.
-9. The UI polls `/status/{job_id}` while the job is live and renders the task table, event log, and worker map from `/jobs/{job_id}` when it settles.
-
----
-
-## Tech Stack
-
-| Component | Technology |
-| --- | --- |
-| API layer | FastAPI 0.109, Uvicorn |
-| Distributed compute | Ray 2.9.2 (remote functions + actor model) |
-| Job state / caching | Redis 7 |
-| Data processing | Pandas 2.2 |
-| Web UI | Vanilla JS (ES modules) + CSS, no build step — served by FastAPI `/static` |
-| Containerisation | Docker, Docker Compose |
-| Data validation | Pydantic v2, pydantic-settings |
-| Cloud storage | boto3 (S3 backend — local filesystem default) |
-| Testing | pytest 7.4, pytest-asyncio, httpx; `node --test` for UI pure logic |
-
----
-
-## Features
+## Key Features
 
 ### Distributed processing
 
-Files are split into equal-sized chunks and dispatched to Ray workers in parallel. Each `process_chunk` remote function carries `max_retries=2`; failed chunks are retried automatically before the job is marked failed. A Ray actor (`ResultAggregator`) accumulates partial results and computes the weighted final value. Mean uses `(sum, count)` pairs per chunk to avoid bias from unequal chunk sizes. Result collection uses `ray.wait()` so the orchestrator is non-blocking and progress updates are issued as each chunk finishes.
+Files are split into equal-sized chunks and dispatched to Ray workers in parallel. Each `process_chunk` remote function carries `max_retries=2`; failed chunks are retried automatically before a job is marked failed. A Ray actor (`ResultAggregator`) accumulates partial results and computes the weighted final value — `mean` uses `(sum, count)` pairs per chunk so unequal chunk sizes never bias the result. Result collection uses `ray.wait()`, keeping the orchestrator non-blocking and issuing progress updates as each chunk finishes.
 
 ### Supported operations
 
@@ -108,33 +52,135 @@ Files are split into equal-sized chunks and dispatched to Ray workers in paralle
 | JSON array | Array of objects at the top level |
 | JSON Lines | One JSON object per line |
 
-JSON files are normalised to CSV chunks internally so the same `process_chunk` function handles all formats without branching.
+JSON files are normalised to CSV chunks internally so one `process_chunk` function handles every format without branching.
 
 ### Job lifecycle
 
 ```text
 uploaded -> processing -> completed
-                       \-> failed
+                        \-> failed
 ```
 
-Status and progress (0 to 100 %) are polled from `GET /status/{job_id}`. Results persist in Redis for 24 hours after completion.
+Status and progress (0–100 %) are polled from `GET /status/{job_id}`. Results persist in Redis for 24 hours after completion.
 
 ### Control plane UI
 
-The SPA (served at `/`, no build step) renders everything from live API state:
+A vanilla JS (ES-module) SPA with **no build step**, served from `/static`. Every view is driven by live API state and designed in a cohesive Obsidian Flux visual language (black title-strips, mono labels, dot-grid backdrops, square geometry — no gradients):
 
 | View | Shows |
 | --- | --- |
-| Overview | Cluster health, live pipeline graph, recent jobs, worker fleet, task telemetry |
-| New job | 4-step wizard with instant file inspection, demo fault-injection toggle (when enabled) |
+| Overview | Cluster health, 4-card pipeline flow, recent jobs, worker fleet, task telemetry |
+| New job | Stitch-style 4-step wizard: dropzone → inspection → config → run |
 | Job | Live progress, per-chunk task table, event log, worker activity map, result banner |
 | History | Full job index with status / operation / search filters |
 | Cluster | Ray node cards, resource allocation, local-mode indicator |
 | Benchmark | Real sequential-vs-distributed runs with verified-equal results |
-| Architecture | System design overview |
-| Settings | Client-side poll intervals + API base URL |
+| Architecture | Full block-diagram system schematic |
 
-The execution graph uses real task counters; the demo fault path shows a chunk fail → retry → recover sequence end to end. Users with `prefers-reduced-motion` get a static graph, and color is never the only signal.
+The execution graph uses real task counters; the demo fault path shows a chunk **fail → retry → recover** sequence end to end. Users with `prefers-reduced-motion` get a static diagram, and color is never the only signal.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client
+        UI["SPA (vanilla JS, served by FastAPI)"]
+    end
+
+    subgraph API["FastAPI Gateway :8000"]
+        GW["REST API /api/v1/*"]
+        ORCH["Orchestrator (background task)"]
+    end
+
+    subgraph ORCH_CP["Orchestrator internals"]
+        CH["ChunkerService<br/>row-bounded CSV/JSON split"]
+        DISP["Ray task dispatch<br/>MAX_CONCURRENT_TASKS window"]
+        AGG["ResultAggregator (Ray actor)<br/>partials -> final value"]
+    end
+
+    subgraph DATA["Distributed compute (Ray)"]
+        HEAD["Ray head :10001"]
+        W1["Worker 1"]
+        W2["Worker 2"]
+        WN["Worker N"]
+    end
+
+    subgraph STATE["Job state (Redis)"]
+        MD["job metadata"]
+        TX["task records"]
+        EV["event log"]
+        RS["results"]
+    end
+
+    subgraph STORE["Storage"]
+        LS["local filesystem /storage"]
+        S3["S3 (optional)"]
+    end
+
+    UI -->|HTTPS| GW
+    GW -->|upload / inspect / process / status / result / jobs / system| ORCH
+    ORCH --> CH
+    ORCH --> DISP
+    ORCH --> AGG
+    CH -->|chunks| DISP
+    DISP -->|remote tasks| HEAD
+    HEAD <--> W1 & W2 & WN
+    W1 & W2 & WN -->|partial results| AGG
+    ORCH <-->|progress / events / results| STATE
+    GW <-->|metadata / index| STATE
+    ORCH -->|read / write files| LS
+    ORCH -.->|optional| S3
+```
+
+### Processing flow for a single job
+
+1. The UI (or a client) uploads a file with an operation (`sum`, `mean`, or `filter`) and a target column.
+2. The file is saved to local storage (or S3). A UUID job ID is returned immediately and indexed in Redis.
+3. Processing is triggered from the wizard (or via `POST /process/{job_id}`). The orchestrator runs as a FastAPI background task.
+4. The file is split into equal-sized chunks (default 50 000 rows each).
+5. One Ray remote task is dispatched per chunk, subject to a `MAX_CONCURRENT_TASKS` concurrency window. Each dispatch writes a task record and an event to Redis.
+6. As each task completes, `ray.wait()` collects the result and forwards it to the `ResultAggregator` actor.
+7. Redis is updated with the progress percentage after each completed chunk; the event log records dispatch, completion, retry, and failure events.
+8. Once all chunks are done, the aggregator returns the final value and the job status is set to `completed`.
+9. The UI polls `/status/{job_id}` while the job is live and renders the task table, event log, and worker map from `/jobs/{job_id}` when it settles.
+
+---
+
+## UI Screens
+
+| Overview | New Job wizard |
+| --- | --- |
+| ![Overview](docs/screenshots/overview.png) | ![New Job](docs/screenshots/new-job.png) |
+
+| Job trace | Cluster |
+| --- | --- |
+| ![Job trace](docs/screenshots/job-trace.png) | ![Cluster](docs/screenshots/cluster.png) |
+
+| History | Benchmark |
+| --- | --- |
+| ![History](docs/screenshots/history.png) | ![Benchmark](docs/screenshots/benchmark.png) |
+
+| Architecture |
+| --- |
+| ![Architecture](docs/screenshots/architecture.png) |
+
+---
+
+## Tech Stack
+
+| Component | Technology |
+| --- | --- |
+| API layer | FastAPI 0.109, Uvicorn |
+| Distributed compute | Ray 2.9.2 (remote functions + actor model) |
+| Job state / caching | Redis 7 |
+| Data processing | Pandas 2.2 |
+| Web UI | Vanilla JS (ES modules) + CSS, no build step — served by FastAPI `/static` |
+| Containerisation | Docker, Docker Compose (dev + production profiles) |
+| Data validation | Pydantic v2, pydantic-settings |
+| Cloud storage | boto3 (S3 backend — local filesystem default) |
+| Testing | pytest 7.4, pytest-asyncio, httpx; `node --test` for UI pure logic |
 
 ---
 
@@ -144,7 +190,7 @@ The execution graph uses real task counters; the demo fault path shows a chunk f
 distributed-file-processor/
 |
 |-- app/
-|   |-- main.py                  FastAPI app, lifespan (Ray init/shutdown), CORS, API key middleware
+|   |-- main.py                  FastAPI app, lifespan (Ray init/shutdown), CORS, API-key + no-store cache middleware
 |   |-- config.py                Environment-based settings via pydantic-settings
 |   |-- models/
 |   |   `-- job.py               Pydantic request/response models and status enums
@@ -175,14 +221,14 @@ distributed-file-processor/
 
 |-- frontend/
 |   |-- index.html               SPA shell (hash router)
-|   |-- styles.css               Dark technical design system
+|   |-- styles.css               Obsidian Flux design system (square, bordered, dot-grid)
 |   `-- js/
 |       |-- main.js              Router + shell
 |       |-- store.js             Central state + route-aware polling
 |       |-- api.js               API client
 |       |-- format.js            Pure formatting helpers
 |       |-- model.js             Pure state normalisation helpers
-|       |-- dom.js / icons.js / components.js / execgraph.js
+|       |-- dom.js / icons.js / components.js / execgraph.js / schematic.js
 |       `-- views/               overview, newjob, job, history, cluster,
 |                                benchmark, architecture, settings
 
@@ -201,27 +247,31 @@ distributed-file-processor/
 |   |-- test_system.sh           End-to-end shell script (Linux/macOS)
 |   `-- test_system.bat          End-to-end batch script (Windows)
 |
-|-- docker-compose.yml           Ray head, 2x Ray workers, Redis, API
-|-- Dockerfile                   API image (python:3.11-slim)
+|-- docker-compose.yml           Development stack (bind-mounted storage, host-user UID)
+|-- docker-compose.prod.yml      Production stack (project: dfp-prod) — see DEPLOYMENT.md
+|-- Dockerfile                   Multi-stage, non-root production image
 |-- requirements.txt
 |-- pytest.ini
-|-- .env.example
+|-- .env.example                 Development environment reference
+|-- .env.production.example      Production environment template (secrets)
+|-- DEPLOYMENT.md                Full production deployment guide
+|-- docs/screenshots/            UI screenshots used in this README
 `-- .github/
     `-- workflows/
-        `-- ci.yml               lint -> test (37 tests) -> Docker build -> smoke test
+        `-- ci.yml               lint -> test -> Docker build -> smoke test
 ```
 
 ---
 
 ## Prerequisites
 
-- Docker and Docker Compose
-- Python 3.11 for local development outside Docker (Ray 2.9.2 does not support Python 3.12 or later)
+- Docker and Docker Compose v2
+- Python 3.11 for local development outside Docker (Ray 2.9.2 does not support Python 3.12+)
 - 4 GB RAM minimum for the Ray head node plus two workers
 
 ---
 
-## Quick Start
+## Quick Start (Development)
 
 ### 1. Clone and configure
 
@@ -237,7 +287,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Wait for all health checks to pass (approximately 30 seconds). All three services must be healthy before the API accepts requests.
+Wait for all health checks to pass (approximately 30 seconds). All services must be healthy before the API accepts requests.
 
 | Service | URL |
 | --- | --- |
@@ -245,6 +295,8 @@ Wait for all health checks to pass (approximately 30 seconds). All three service
 | Interactive API docs (Swagger UI) | <http://localhost:8000/docs> |
 | Ray Dashboard | <http://localhost:8265> |
 | Redis (host-mapped) | localhost:6380 |
+
+> The development compose runs the API as your host user (UID/GID from your environment) so the bind-mounted `./storage` stays writable. The production image keeps the default non-root UID.
 
 ### 3. Generate test data
 
@@ -281,13 +333,47 @@ On Windows, use `scripts/test_system.bat` which wraps the above flow interactive
 
 ---
 
+## Production Deployment
+
+Production runs a separate, hardened stack — see **[DEPLOYMENT.md](DEPLOYMENT.md)** for the full guide. Highlights:
+
+| Production control | How |
+| --- | --- |
+| Non-root process | API image runs as UID 999 (`USER app`), `tini` as PID 1, no `--reload` |
+| API-key gate | Every `/api/v1/*` request requires `X-API-Key: <value>` |
+| CORS allow-list | `ALLOWED_ORIGINS` must be your real domain(s), never `*` |
+| Redis protection | `REDIS_PASSWORD` + AOF persistence on named volume `dfp-redis-data` |
+| No internal exposure | Ray dashboard / client and Redis are **not** published on the host |
+| Restart policy | `unless-stopped` on every service + resource limits |
+| Demo disabled | `DEMO_MODE` hard-coded to `false` |
+| Storage | Named volume `dfp-storage` (survives container recreation) |
+
+### Quick production start
+
+```bash
+cp .env.production.example .env.production
+# edit .env.production: set API_KEY_SECRET, REDIS_PASSWORD, ALLOWED_ORIGINS
+
+make prod-up
+# or:
+# docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+
+curl http://localhost:8000/health
+# {"status":"healthy","ray_initialized":true,"redis_connected":true,"demo_mode":false}
+```
+
+Other helpers: `make prod-down`, `make prod-logs`, `make prod-ps`.
+
+---
+
 ## Configuration
 
-All settings are loaded from environment variables or a `.env` file in the project root. See `.env.example` for the annotated reference.
+All settings are loaded from environment variables or a `.env` file in the project root. See `.env.example` (dev) and `.env.production.example` (production).
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection string |
+| `REDIS_PASSWORD` | unset | Optional Redis password, merged into the connection URL (never logged) |
 | `RAY_ADDRESS` | `ray://ray-head:10001` | Ray cluster address. Use `local` for single-machine mode |
 | `STORAGE_TYPE` | `local` | `local` or `s3` |
 | `STORAGE_PATH` | `./storage` | Root directory for raw files and chunks (local mode) |
@@ -301,7 +387,7 @@ All settings are loaded from environment variables or a `.env` file in the proje
 | `S3_BUCKET_NAME` | unset | S3 bucket name |
 | `S3_REGION` | `us-east-1` | S3 region |
 | `LOG_LEVEL` | `INFO` | Python logging level |
-| `DEMO_MODE` | `false` | When `true`, enables the `/api/v1/demo/fault` endpoint and the fault-injection toggle in the UI wizard |
+| `DEMO_MODE` | `false` | When `true`, enables `/api/v1/demo/fault` and the fault-injection toggle in the wizard |
 | `MAX_BENCHMARK_ROWS` | `2000000` | Upper bound for the `/api/v1/benchmark` row count |
 
 ---
@@ -315,7 +401,7 @@ GET /health
 ```
 
 ```json
-{"status": "healthy", "ray_initialized": true}
+{"status": "healthy", "ray_initialized": true, "redis_connected": true, "demo_mode": false}
 ```
 
 ---
@@ -517,20 +603,15 @@ CI runs the full pytest suite on Python 3.11 with a Redis service container, fol
 
 ### Add Ray workers
 
-```yaml
-# docker-compose.yml
-ray-worker:
-  deploy:
-    replicas: 4
-```
-
 ```bash
 docker compose up --scale ray-worker=4
 ```
 
+In production, set `RAY_WORKER_REPLICAS` in `.env.production`.
+
 ### Increase task parallelism
 
-Set `MAX_CONCURRENT_TASKS` in `.env` to match the total CPU count across all workers.
+Set `MAX_CONCURRENT_TASKS` to match the total CPU count across all workers.
 
 ### Reduce per-task memory
 
@@ -554,7 +635,7 @@ The web UI is the primary monitoring surface: Overview (cluster + task telemetry
 
 ### Ray Dashboard
 
-Available at `http://localhost:8265`. Shows active and completed tasks with timing, per-worker CPU and memory utilisation, actor list (ResultAggregator instances), and object store usage.
+Available at `http://localhost:8265` (dev only — not exposed in production). Shows active and completed tasks with timing, per-worker CPU and memory utilisation, actor list (ResultAggregator instances), and object store usage.
 
 ### Application logs
 
@@ -587,7 +668,9 @@ redis-cli -p 6380 keys "job:*"
 | Path traversal | Raw files are stored as `<UUID>.<ext>` with no user-supplied path components. |
 | Error exposure | Exception messages returned to clients are truncated to 200 characters with no stack traces. |
 | Redis write safety | Progress updates use `WATCH`/`MULTI`/`EXEC` (optimistic locking) to prevent race conditions. |
-| Secret management | AWS credentials and API key are read from environment variables only. `.env` is excluded from version control via `.gitignore`. |
+| Redis password | `REDIS_PASSWORD` merged into the connection URL — never logged; required in production. |
+| Secret management | AWS credentials, API key, and Redis password are read from environment variables only. `.env` and `.env.production` are excluded from version control. |
+| Non-root runtime | Production image runs as UID 999 (`USER app`), no `--reload`. |
 
 ---
 
@@ -631,3 +714,23 @@ The `column` field in the upload request must exactly match a header in the uplo
 ```bash
 head -1 your_file.csv
 ```
+
+### API returns 401 in production
+
+The `X-API-Key` header is missing or does not match `API_KEY_SECRET`. Set the key client-side (`localStorage.setItem("dfp.settings", JSON.stringify({ apiBase: "..." }))`) or inject it at the reverse proxy.
+
+### Production stack refuses to start
+
+`REDIS_PASSWORD`, `API_KEY_SECRET`, and `ALLOWED_ORIGINS` are required in `.env.production` — the compose file fails fast if any is missing. See `.env.production.example`.
+
+---
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+## Acknowledgements
+
+Built with [Ray](https://www.ray.io/), [FastAPI](https://fastapi.tiangolo.com/), [Redis](https://redis.io/), and [pandas](https://pandas.pydata.org/). UI design follows a custom Obsidian Flux system inspired by the Google Stitch "Ray Brutalist Control Plane" reference screens.

@@ -62,6 +62,11 @@ services:
   # ── FastAPI application ───────────────────────────────────────────────────
   api:
     build: .
+    # The image runs as a non-root "app" user (UID 999). In dev we bind-mount
+    # ./storage (owned by the host user), so run as the host user to keep it
+    # writable. Production (docker-compose.prod.yml) uses a named volume and
+    # keeps the default non-root UID.
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       - "8000:8000"
     environment:
