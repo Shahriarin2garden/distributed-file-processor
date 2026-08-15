@@ -1,0 +1,152 @@
+# Production deployment for the Distributed File Processing System.
+#
+# Usage:
+#   cp .env.production.example .env.production
+#   # 1) edit .env.production (set API_KEY_SECRET, REDIS_PASSWORD, ALLOWED_ORIGINS, S3/RAY as needed)
+#   # 2) docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+#
+# Compared to docker-compose.yml (dev) this:
+#   * pins restart policies (unless-stopped) and resource limits
+#   * does NOT expose Ray dashboard / Ray client / Redis on the host
+#   * runs Redis with a password + AOF persistence on a named volume
+#   * keeps job storage on a named volume
+#   * gates /api/v1/* behind X-API-Key (API_KEY_SECRET)
+#   * disables DEMO_MODE / fault injection (default false)
+#   * runs the API image as a non-root user without --reload
+
+name: dfp-prod
+
+services:
+
+  # ── Ray head node (internal network only) ──────────────────────────────
+  ray-head:
+    image: rayproject/ray:2.9.2-py311
+    command: >
+      ray start --head
+      --dashboard-host 0.0.0.0
+      --ray-client-server-port 10001
+      --num-cpus ${RAY_HEAD_CPUS:-4}
+      --block
+    # Uncomment the next two lines only if you want the Ray dashboard reachable
+    # from the host (e.g. behind a VPN). It is NOT meant for public exposure.
+    # ports:
+    #   - "8265:8265"
+    environment:
+      - PYTHONPATH=/opt/dfp
+    volumes:
+      - ./app:/opt/dfp/app
+      - storage:/storage
+    networks:
+      - ray-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ray", "status"]
+      interval: 15s
+      timeout: 20s
+      retries: 6
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "${RAY_HEAD_CPUS:-4}"
+          memory: 4g
+
+  # ── Ray workers ──────────────────────────────────────────────────────────
+  ray-worker:
+    image: rayproject/ray:2.9.2-py311
+    command: ray start --address='ray-head:6379' --num-cpus ${RAY_WORKER_CPUS:-2} --block
+    depends_on:
+      ray-head:
+        condition: service_healthy
+    environment:
+      - PYTHONPATH=/opt/dfp
+    volumes:
+      - ./app:/opt/dfp/app
+      - storage:/storage
+    networks:
+      - ray-net
+    restart: unless-stopped
+    deploy:
+      replicas: ${RAY_WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: "${RAY_WORKER_CPUS:-2}"
+          memory: 4g
+
+  # ── Application Redis (internal only, password + AOF persistence) ────────
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env.production}
+    volumes:
+      - redis-data:/data
+    networks:
+      - ray-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env.production}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # ── FastAPI application ──────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env.production}
+      - RAY_ADDRESS=ray://ray-head:10001
+      - STORAGE_TYPE=${STORAGE_TYPE:-local}
+      - STORAGE_PATH=/storage
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - CHUNK_SIZE_ROWS=${CHUNK_SIZE_ROWS:-50000}
+      - MAX_CONCURRENT_TASKS=${MAX_CONCURRENT_TASKS:-8}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-500}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:?ALLOWED_ORIGINS must be set in .env.production (your app domain)}
+      - API_KEY_SECRET=${API_KEY_SECRET:?API_KEY_SECRET must be set in .env.production}
+      - DEMO_MODE=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      ray-head:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - storage:/storage
+    networks:
+      - ray-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+volumes:
+  redis-data:
+    name: dfp-redis-data
+  storage:
+    name: dfp-storage
+
+networks:
+  ray-net:
+    driver: bridge

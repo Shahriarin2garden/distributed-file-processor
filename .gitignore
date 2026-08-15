@@ -33,6 +33,7 @@ wheels/
 # Environment
 .env
 .env.local
+.env.production
 
 # Storage
 storage/

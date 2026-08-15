@@ -4,6 +4,9 @@ from typing import Optional
 
 class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
+    # Optional Redis password. When set, it is merged into the connection URL
+    # so nothing (password) is logged or passed around separately.
+    redis_password: Optional[str] = None
     ray_address: str = "ray://localhost:10001"
     storage_type: str = "local"
 

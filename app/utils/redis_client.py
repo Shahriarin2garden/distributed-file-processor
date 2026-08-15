@@ -17,7 +17,17 @@ _BENCHMARK_TTL = 7 * 86400  # keep benchmark history for a week
 
 class RedisClient:
     def __init__(self):
-        self.client = redis.from_url(settings.redis_url, decode_responses=True)
+        redis_url = settings.redis_url
+        if settings.redis_password:
+            if "://" in redis_url and "@" not in redis_url:
+                scheme, _, rest = redis_url.partition("://")
+                redis_url = f"{scheme}://:{settings.redis_password}@{rest}"
+            else:
+                raise ValueError(
+                    "REDIS_PASSWORD is set but REDIS_URL already contains credentials "
+                    "or is malformed. Provide REDIS_URL without a password."
+                )
+        self.client = redis.from_url(redis_url, decode_responses=True)
 
     # ---------- job metadata ----------
 
