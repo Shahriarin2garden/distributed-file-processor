@@ -1,4 +1,6 @@
-// Execution graph — the signature element.
+// Execution graph — the signature element, rendered in the Obsidian Flux
+// neo-brutalist language: square nodes, 2px black strokes, hard offset
+// shadows, black title strips, dot-grid backdrop, square particles.
 //
 // INPUT → CHUNKER → (fan-out) → WORKERS(n) → (fan-in) → AGGREGATOR → RESULT
 //
@@ -8,6 +10,8 @@
 // graph, and the graph always carries a textual summary for screen readers.
 
 export const GRAPH_STAGES = ["upload", "chunker", "workers", "aggregator", "result"];
+
+const HEAD_H = 19; // black title strip height
 
 function prefersReducedMotion() {
   try {
@@ -40,10 +44,10 @@ export function renderGraph({
         running: 0, completed: 0, failed: 0, total: 0,
       }));
 
-  const padX = 24;
-  const topY = 62, topH = 44, topW = 116;
-  const workerY = 152, workerH = 66, workerW = 96;
-  const botY = 254, botH = 44, botW = 116;
+  const padX = 26;
+  const topY = 64, topH = 48, topW = 128;
+  const workerY = 156, workerH = 70, workerW = 100;
+  const botY = 262, botH = 48, botW = 128;
   const k = workerDefs.length;
 
   const cx = (i, n, w) => padX + ((width - padX * 2) * (i + 0.5)) / n;
@@ -86,7 +90,7 @@ export function renderGraph({
   });
 
   const nodeLayer = [
-    stageNode("UPLOAD", "HTTP ingest", upload, stageActive.upload),
+    stageNode("UPLOAD", "http ingest", upload, stageActive.upload),
     stageNode("CHUNKER", "parallelize", chunker, stageActive.chunker),
     ...workerNodes.map((w) => workerNode(w, stageActive.workers, reduced)),
     stageNode("AGGREGATOR", "merge partials", agg, stageActive.aggregator),
@@ -100,7 +104,7 @@ export function renderGraph({
     const count = e.id === "up-w" ? 2 : 1;
     for (let p = 0; p < count; p++) {
       const dur = 1.1 + ((i + p) % 3) * 0.35;
-      out += `<circle r="2.2" class="g-particle"><animateMotion dur="${dur}s" repeatCount="indefinite" begin="${(p * 0.55 - i * 0.13).toFixed(2)}s"><mpath href="#gpath${i}"/></animateMotion></circle>`;
+      out += `<rect width="3.5" height="3.5" class="g-particle"><animateMotion dur="${dur}s" repeatCount="indefinite" begin="${(p * 0.55 - i * 0.13).toFixed(2)}s"><mpath href="#gpath${i}"/></animateMotion></rect>`;
     }
     return out;
   }).join("");
@@ -110,18 +114,22 @@ export function renderGraph({
   const summary = graphTextSummary({ active, running, workers: workerDefs.length, taskGroups, reduced });
   const foot = `
     <g class="g-footer">
-      <text x="${padX}" y="${height - 8}" class="g-foot-note">${hasJob ? `job: ${active}` : "idle — awaiting job"}</text>
-      <text x="${width - padX}" y="${height - 8}" text-anchor="end" class="g-foot-note">${workerDefs.length} worker${workerDefs.length === 1 ? "" : "s"} · ${running} active tasks · ${Math.round(progress)}%</text>
+      <text x="${padX}" y="${height - 6}" class="g-foot-note">${hasJob ? `job: ${active}` : "idle — awaiting job"}</text>
+      <text x="${width - padX}" y="${height - 6}" text-anchor="end" class="g-foot-note">${workerDefs.length} worker${workerDefs.length === 1 ? "" : "s"} · ${running} active tasks · ${Math.round(progress)}%</text>
     </g>`;
 
   return `
   <svg class="exec-graph" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttr(summary)}">
     <title>${escapeAttr(summary)}</title>
     <defs>
-      <marker id="g-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--border-strong)"/>
+      <pattern id="g-dots" width="16" height="16" patternUnits="userSpaceOnUse">
+        <circle cx="1.6" cy="1.6" r="1" fill="var(--border-soft)"/>
+      </pattern>
+      <marker id="g-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--border)"/>
       </marker>
     </defs>
+    <rect class="g-gridbg" x="0" y="0" width="${width}" height="${height}" fill="url(#g-dots)"/>
     ${pathDefs}
     ${edgeLayer}
     ${nodeLayer}
@@ -130,18 +138,22 @@ export function renderGraph({
   </svg>`;
 }
 
+function shadow(n) {
+  return `<rect class="g-shadow" x="${n.x + 4}" y="${n.y + 4}" width="${n.w}" height="${n.h}"/>`;
+}
+
 function stageNode(label, sub, n, active) {
   return `
   <g class="g-node ${active ? "active" : "idle"}">
-    <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="8" class="g-node-bg"/>
-    <rect x="${n.x}" y="${n.y}" width="${n.w}" height="2" rx="1" class="g-node-top"/>
-    <text x="${n.cx}" y="${n.y + 19}" text-anchor="middle" class="g-node-title">${label}</text>
-    <text x="${n.cx}" y="${n.y + 33}" text-anchor="middle" class="g-node-sub">${sub}</text>
+    ${shadow(n)}
+    <rect class="g-node-bg" x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}"/>
+    <rect class="g-node-head" x="${n.x}" y="${n.y}" width="${n.w}" height="${HEAD_H}"/>
+    <text x="${n.cx}" y="${n.y + 13}" text-anchor="middle" class="g-node-title">${label}</text>
+    <text x="${n.cx}" y="${n.y + 35}" text-anchor="middle" class="g-node-sub">${sub}</text>
   </g>`;
 }
 
 function workerNode(w, active, reduced) {
-  const hasTasks = w.real;
   const running = w.running || 0;
   const completed = w.completed || 0;
   const failedN = w.failed || 0;
@@ -152,16 +164,19 @@ function workerNode(w, active, reduced) {
     failedN > 0 ? " bad" : "",
     completed > 0 && !running ? " done" : "",
   ].join(" ");
-  const pulse = reduced ? "" : (running > 0 ? `<circle class="g-pulse" cx="${w.cx}" cy="${w.y + w.h / 2}" r="40"></circle>` : "");
+  const pulse = reduced ? "" : (running > 0 ? `<rect class="g-pulse" x="${w.cx - 40}" y="${w.y + w.h / 2 - 40}" width="80" height="80"></rect>` : "");
+  const headInk = completed > 0 && !running ? "g-title-ink" : "";
+  const subInk = running > 0 || failedN > 0 ? "" : "g-sub-ink";
   return `
   <g class="${cls}">
+    ${shadow(w)}
     ${pulse}
-    <rect x="${w.x}" y="${w.y}" width="${w.w}" height="${w.h}" rx="8" class="g-node-bg"/>
-    <rect x="${w.x}" y="${w.y}" width="${w.w}" height="2" rx="1" class="g-node-top"/>
-    <text x="${w.cx}" y="${w.y + 18}" text-anchor="middle" class="g-node-title">${escapeAttr(w.id)}</text>
-    <text x="${w.cx}" y="${w.y + 31}" text-anchor="middle" class="g-node-sub">${hasTasks ? "ONLINE" : "SLOT"}</text>
-    <text x="${w.cx}" y="${w.y + 49}" text-anchor="middle" class="g-node-meta mono">${running} run · ${completed} ok${failedN ? ` · ${failedN} fail` : ""}</text>
-    <text x="${w.cx}" y="${w.y + 61}" text-anchor="middle" class="g-node-tick">${running > 0 ? "▮▮▮" : completed > 0 ? "✓" : ""}</text>
+    <rect class="g-node-bg" x="${w.x}" y="${w.y}" width="${w.w}" height="${w.h}"/>
+    <rect class="g-node-head" x="${w.x}" y="${w.y}" width="${w.w}" height="${HEAD_H}"/>
+    <text x="${w.cx}" y="${w.y + 13}" text-anchor="middle" class="g-node-title ${headInk}">${escapeAttr(w.id)}</text>
+    <text x="${w.cx}" y="${w.y + 33}" text-anchor="middle" class="g-node-sub ${subInk}">${w.real ? "ONLINE" : "SLOT"}</text>
+    <text x="${w.cx}" y="${w.y + 51}" text-anchor="middle" class="g-node-meta">${running} run · ${completed} ok${failedN ? ` · ${failedN} fail` : ""}</text>
+    <text x="${w.cx}" y="${w.y + 64}" text-anchor="middle" class="g-node-tick">${running > 0 ? "▮▮▮" : completed > 0 ? "✓" : ""}</text>
   </g>`;
 }
 

@@ -1,12 +1,21 @@
+// Architecture — mirrors the Obsidian Flux "System Architecture" screen:
+// schematic panel with a live pipeline graph over a dot-grid backdrop,
+// numbered execution-pipeline data flow, a System Nodes sidebar, a
+// technology stack, quick actions, and the engineering decisions.
+
 import { h, clear, on } from "../dom.js";
 import { icon } from "../icons.js";
-import { SectionTitle, Panel } from "../components.js";
+import { Panel } from "../components.js";
 import { renderGraph } from "../execgraph.js";
+import { store } from "../store.js";
+import { timeAgo } from "../format.js";
 
 const COMPONENTS = [
   {
     id: "client",
-    name: "Client / Browser",
+    code: "01",
+    color: "teal",
+    name: "Client Layer",
     role: "Control plane",
     purpose: "The entry point. A vanilla SPA served by FastAPI at / that renders live backend state — node counts, task progress, events, and benchmark numbers. No metrics are fabricated in the client.",
     responsibility: "Wizard (file → operation → settings → review), live execution views, cluster and history exploration.",
@@ -16,7 +25,9 @@ const COMPONENTS = [
   },
   {
     id: "api",
-    name: "FastAPI",
+    code: "02",
+    color: "magenta",
+    name: "FastAPI Gateway",
     role: "Ingest + control",
     purpose: "Validates and persists uploads, inspects files, and fans work out to Ray. The only entry point for clients.",
     responsibility: "Multipart upload handling, content-type / size validation, job indexing, API-key gate, CORS.",
@@ -26,6 +37,8 @@ const COMPONENTS = [
   },
   {
     id: "orchestrator",
+    code: "03",
+    color: "teal-bright",
     name: "Orchestrator",
     role: "Dispatch loop",
     purpose: "Runs each job as a bounded-concurrency loop: chunk, dispatch, collect via ray.wait(), aggregate, persist.",
@@ -36,6 +49,8 @@ const COMPONENTS = [
   },
   {
     id: "chunker",
+    code: "04",
+    color: "black",
     name: "Chunker",
     role: "Parallelize",
     purpose: "Turns one large file into N independent, row-bounded CSV chunks — the unit of parallel work.",
@@ -46,7 +61,9 @@ const COMPONENTS = [
   },
   {
     id: "ray",
-    name: "Ray",
+    code: "05",
+    color: "teal",
+    name: "Ray Runtime",
     role: "Distributed runtime",
     purpose: "Schedules remote tasks across the worker fleet and hosts the ResultAggregator actor.",
     responsibility: "Task placement, object store, actor lifecycle, retries (max_retries=2 on process_chunk).",
@@ -56,7 +73,9 @@ const COMPONENTS = [
   },
   {
     id: "workers",
-    name: "Ray workers",
+    code: "06",
+    color: "magenta",
+    name: "Compute Cluster",
     role: "Compute",
     purpose: "Each worker runs process_chunk() on its assigned chunk and returns a partial result. Tasks carry no app-internal imports, so they pickle cleanly across the cluster.",
     responsibility: "Chunk → (value, count) partial for sum / mean / filter; attach the executing node id.",
@@ -66,7 +85,9 @@ const COMPONENTS = [
   },
   {
     id: "aggregator",
-    name: "Aggregator",
+    code: "07",
+    color: "teal-bright",
+    name: "Result Aggregator",
     role: "Merge results",
     purpose: "A stateful Ray actor that collects partials and computes the deterministic final value.",
     responsibility: "Sum of values; weighted mean via (sum, count) pairs to avoid chunk-size bias.",
@@ -76,7 +97,9 @@ const COMPONENTS = [
   },
   {
     id: "redis",
-    name: "Redis",
+    code: "08",
+    color: "black",
+    name: "State Storage",
     role: "Source of truth",
     purpose: "Single source of truth for job state: metadata, progress, results, tasks, events, job index, benchmarks.",
     responsibility: "Atomic progress (WATCH/MULTI/EXEC), capped event log, 24 h job TTL.",
@@ -86,6 +109,8 @@ const COMPONENTS = [
   },
   {
     id: "storage",
+    code: "09",
+    color: "teal",
     name: "Storage",
     role: "Filesystem / S3",
     purpose: "Holds raw uploads and generated chunks under UUID paths (no user path traversal) with an S3 interface ready.",
@@ -96,10 +121,11 @@ const COMPONENTS = [
   },
 ];
 
-const FLOW = [
-  ["client", "api"], ["api", "orchestrator"], ["orchestrator", "chunker"],
-  ["chunker", "ray"], ["ray", "workers"], ["workers", "aggregator"],
-  ["aggregator", "redis"],
+const PIPELINE = [
+  ["01. INGESTION", "teal", "The client SPA sends the file payload and metadata to the FastAPI gateway. The payload is validated and temporarily staged."],
+  ["02. ORCHESTRATION & CHUNKING", "magenta", "The orchestrator receives the job; the chunker splits the file into row-bounded CSV chunks. Metadata is synced to Redis."],
+  ["03. DISTRIBUTED COMPUTATION", "teal-bright", "Ray tasks schedule chunk processing across the worker cluster. Nodes execute the Pandas operation in parallel and return partial results."],
+  ["04. AGGREGATION & DELIVERY", "black", "The ResultAggregator actor compiles partials, verifies integrity, and persists the deterministic result back to Redis."],
 ];
 
 const DECISIONS = [
@@ -124,80 +150,154 @@ const TRADEOFFS = [
   ["Retrying at the Ray task layer changes failure semantics", "Ray's max_retries=2 hides transient failures from the orchestrator (good for reliability, opaque for observability). The demo path disables it so failures become visible events — and then orchestrates its own retry."],
 ];
 
+const STACK = ["FastAPI", "Ray.io", "Redis", "Pandas", "Docker", "Python"];
+
+function systemStatus(sys) {
+  if (!sys) return { label: "CONNECTING", tone: "neutral" };
+  const nodesUp = (sys.nodes?.length ?? 0) > 0;
+  if (sys.redis_connected && sys.ray_initialized && nodesUp) return { label: "STABLE", tone: "ok" };
+  if (sys.redis_connected && sys.ray_initialized) return { label: "DEGRADED", tone: "warn" };
+  return { label: "DOWN", tone: "bad" };
+}
+
 export async function mountArchitecture(root) {
   clear(root);
   root.appendChild(h(`
     <div class="page">
-      ${SectionTitle({
-        kicker: "SYSTEM DESIGN",
-        title: "Architecture",
-        sub: "How a file becomes a distributed result — click a component for its role and failure behavior.",
-      })}
-      <div class="panel">
-        <div class="panel-body">
-          <div id="arch-flow"></div>
-          <div class="arch-flow-note mono xs dim">live pipeline topology · motion reflects job activity</div>
+      <!-- Page header -->
+      <header class="arch-header">
+        <div>
+          <div class="kicker">System design</div>
+          <h1 class="arch-title">System Architecture</h1>
+          <p class="arch-sub mono">High-level schematic of the Distributed File Processing System. Component interaction from client ingestion to worker-node execution and aggregation.</p>
         </div>
-      </div>
-      <div class="grid-2 arch-explore">
-        <div class="panel">
-          <div class="panel-head"><h2 class="panel-title">${icon("network", 13)} Components</h2></div>
-          <div class="panel-body">
-            <div class="arch-components" id="arch-components"></div>
+        <div class="arch-header-right">
+          <div class="arch-status" id="arch-status">STATUS: —</div>
+          <div class="mono xs dim" id="arch-synced">LAST SYNCED: —</div>
+        </div>
+      </header>
+
+      <div class="grid-12">
+        <div class="col-8 flex flex-col gap-lg">
+          <!-- Schematic panel -->
+          <section class="arch-schematic">
+            <div class="arch-bar">
+              <span class="arch-bar-title">ARCHITECTURE_SCHEMATIC_v2.DRW</span>
+              <span class="arch-lights" aria-hidden="true"><span class="light red"></span><span class="light teal"></span><span class="light magenta"></span></span>
+            </div>
+            <div class="arch-canvas">
+              <div id="arch-flow" class="arch-flow"></div>
+            </div>
+          </section>
+
+          <!-- Execution pipeline: data flow -->
+          <section class="panel panel-strong">
+            <div class="panel-head"><h2 class="panel-title">${icon("gitBranch", 13)} Execution Pipeline: Data Flow</h2></div>
+            <div class="panel-body">
+              <ol class="pipe-list">
+                ${PIPELINE.map(([label, tone, body]) => `
+                  <li>
+                    <span class="pipe-bullet tone-${tone}" aria-hidden="true"></span>
+                    <div>
+                      <div class="pipe-title">${label}</div>
+                      <p class="pipe-body">${body}</p>
+                    </div>
+                  </li>`).join("")}
+              </ol>
+            </div>
+          </section>
+        </div>
+
+        <div class="col-4 flex flex-col gap-lg">
+          <!-- System nodes -->
+          <section class="arch-side-panel">
+            <div class="arch-side-head">${icon("network", 13)} System Nodes</div>
+            <div class="arch-nodes" id="arch-nodes">
+              ${COMPONENTS.map((c) => `
+                <button type="button" class="arch-node-row${c.id === "client" ? " active" : ""}" data-arch="${c.id}">
+                  <span class="arch-node-title color-${c.color}">[${c.code}] ${c.name.toUpperCase()}</span>
+                  <span class="arch-node-arrow" aria-hidden="true">${icon("arrowRight", 12)}</span>
+                </button>`).join("")}
+            </div>
+          </section>
+
+          <!-- Tech stack -->
+          <section class="arch-side-panel">
+            <div class="arch-side-head">${icon("terminal", 13)} Technology Stack</div>
+            <div class="arch-chips">
+              ${STACK.map((t) => `<span class="arch-chip">${t}</span>`).join("")}
+            </div>
+          </section>
+
+          <!-- Quick actions -->
+          <div class="arch-actions">
+            <a class="btn btn-primary btn-block" href="#/new">${icon("play", 14)} Run a job</a>
+            <a class="btn btn-ghost btn-block" href="/docs" target="_blank" rel="noopener">${icon("external", 14)} View API docs</a>
           </div>
         </div>
-        <div class="panel">
+      </div>
+
+      <!-- Component detail + decisions -->
+      <div class="grid-2">
+        <section class="panel">
           <div class="panel-head"><h2 class="panel-title">${icon("info", 13)} Component detail</h2></div>
           <div class="panel-body" id="arch-detail"></div>
-        </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2 class="panel-title">${icon("gitBranch", 13)} Key engineering decisions</h2></div>
+          <div class="panel-body">
+            <div class="qa-list">${DECISIONS.map(([q, a]) => `<details class="qa"><summary>${q}</summary><p>${a}</p></details>`).join("")}</div>
+          </div>
+        </section>
       </div>
+
       <div class="grid-2">
-        ${Panel({
-          title: "Key engineering decisions",
-          iconName: "gitBranch",
-          body: `<div class="qa-list">${DECISIONS.map(([q, a]) => `<details class="qa"><summary>${q}</summary><p>${a}</p></details>`).join("")}</div>`,
-        })}
         ${Panel({
           title: "Engineering tradeoffs",
           iconName: "alertTriangle",
           body: `<div class="qa-list">${TRADEOFFS.map(([q, a]) => `<details class="qa"><summary>${q}</summary><p>${a}</p></details>`).join("")}</div>`,
         })}
+        ${Panel({
+          title: "Design invariants",
+          iconName: "shield",
+          body: `
+            <ul class="invariant-list">
+              <li>Every number the UI shows is computed from live API data — no sample/placeholder metrics.</li>
+              <li>Worker tasks stay free of app-internal imports (Ray remote functions are self-contained).</li>
+              <li>Errors surfaced to users are sanitized; full details stay in server logs.</li>
+              <li>Reduced-motion users get a static pipeline graph; color is never the only signal.</li>
+            </ul>`,
+        })}
       </div>
-      ${Panel({
-        title: "Design invariants",
-        iconName: "shield",
-        body: `
-          <ul class="invariant-list">
-            <li>Every number the UI shows is computed from live API data — no sample/placeholder metrics.</li>
-            <li>Worker tasks stay free of app-internal imports (Ray remote functions are self-contained).</li>
-            <li>Errors surfaced to users are sanitized; full details stay in server logs.</li>
-            <li>Reduced-motion users get a static pipeline graph; color is never the only signal.</li>
-          </ul>`,
-      })}
     </div>
   `));
 
   const flowEl = root.querySelector("#arch-flow");
-  const compEl = root.querySelector("#arch-components");
+  const nodesEl = root.querySelector("#arch-nodes");
   const detailEl = root.querySelector("#arch-detail");
+  const statusEl = root.querySelector("#arch-status");
+  const syncedEl = root.querySelector("#arch-synced");
 
-  flowEl.innerHTML = renderGraph({ width: 700, height: 250, workers: 3 });
-
-  compEl.appendChild(h(`
-    <div class="arch-components">
-      ${COMPONENTS.map((c, i) => `
-        <button type="button" class="arch-node${i === 0 ? " active" : ""}" data-arch="${c.id}">
-          <span class="arch-node-name">${c.name}</span>
-          <span class="arch-node-role mono xs">${c.role}</span>
-        </button>`).join("")}
-    </div>
-  `));
+  const renderLive = () => {
+    const sys = store.system;
+    const st = systemStatus(sys);
+    statusEl.className = `arch-status tone-${st.tone}`;
+    statusEl.textContent = `STATUS: ${st.label}`;
+    const workers = sys?.nodes?.length ?? 3;
+    syncedEl.textContent = store.lastSystemAt
+      ? `LAST SYNCED: ${timeAgo(new Date(store.lastSystemAt).toISOString())}`
+      : "LAST SYNCED: —";
+    flowEl.innerHTML = renderGraph({ width: 700, height: 250, workers: Math.max(1, workers) });
+  };
 
   const renderDetail = (id) => {
     const c = COMPONENTS.find((x) => x.id === id) || COMPONENTS[0];
     detailEl.replaceChildren(h(`
       <div class="arch-detail">
-        <div class="arch-detail-head"><span class="arch-index">${icon("box", 13)}</span><h3>${c.name}</h3></div>
+        <div class="arch-detail-head">
+          <span class="arch-index color-${c.color}">${icon("box", 13)}</span>
+          <h3>${c.name}</h3>
+        </div>
         ${kv("Purpose", c.purpose)}
         ${kv("Responsibility", c.responsibility)}
         ${kv("Implementation", c.implementation)}
@@ -212,7 +312,10 @@ export async function mountArchitecture(root) {
     renderDetail(btn.dataset.arch);
   });
 
+  const off = store.subscribe(renderLive);
+  renderLive();
   renderDetail(COMPONENTS[0].id);
+  return off;
 }
 
 function kv(k, v) {

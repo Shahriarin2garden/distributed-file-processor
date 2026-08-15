@@ -55,6 +55,7 @@ class Store {
     try {
       this.system = await api.system();
       this.systemError = null;
+      this.lastSystemAt = Date.now();
     } catch (err) {
       this.systemError = err.message;
     } finally {
@@ -130,12 +131,15 @@ class Store {
       this.refreshJobs();
     }
 
-    if (route === "/history" && !this.jobs) this.refreshJobs();
+    if (route === "/history") {
+      this.refreshJobs();
+      this.timers.jobs = setInterval(() => this.refreshJobs(), t.pollJobs);
+    }
     if (route === "/benchmark") {
       this.refreshBenchmarks();
       this.timers.benchmarks = setInterval(() => this.refreshBenchmarks(), t.pollJobs);
     }
-    if (route === "/cluster") {
+    if (route === "/cluster" || route === "/architecture") {
       this.timers.system = setInterval(() => this.refreshSystem(), t.pollSystem);
       this.refreshSystem();
     }

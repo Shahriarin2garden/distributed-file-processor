@@ -1,5 +1,7 @@
-// Tiny dependency-free SVG chart used by the benchmark study.
-// Pure DOM-free geometry helpers are exported for unit testing.
+// Tiny dependency-free SVG chart used by the benchmark study, drawn in the
+// Obsidian Flux neo-brutalist language: crisp square markers, hard 2px axis,
+// solid grid, square line-caps. Pure DOM-free geometry helpers are exported
+// for unit testing.
 
 // Compute pixel geometry for a set of points.
 // x is placed on a log scale (workload sizes span decades); y is linear.
@@ -69,18 +71,18 @@ export function lineChart({ points, width = 640, height = 220 }) {
     return pts.join(" ");
   };
 
-  const dots = (key) => points.map((p) => (p[key] == null ? "" : `
-    <circle cx="${px(p.x).toFixed(1)}" cy="${py(p[key]).toFixed(1)}" r="3" class="c-dot c-dot-${key}"/>`)).join("");
+  const squares = (key) => points.map((p) => (p[key] == null ? "" : `
+    <rect x="${(px(p.x) - 3.5).toFixed(1)}" y="${(py(p[key]) - 3.5).toFixed(1)}" width="7" height="7" class="c-dot c-dot-${key}"/>`)).join("");
 
   return `
-  <svg class="line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Measured runtime scaling: sequential vs distributed milliseconds by row count">
+  <svg class="line-chart" viewBox="0 0 ${width} ${height}" shape-rendering="crispEdges" role="img" aria-label="Measured runtime scaling: sequential vs distributed milliseconds by row count">
     <line x1="${g.padL}" y1="${height - g.padB}" x2="${width - g.padR}" y2="${height - g.padB}" class="c-axis"/>
     <line x1="${g.padL}" y1="${g.padT}" x2="${g.padL}" y2="${height - g.padB}" class="c-axis"/>
     ${grid}
     ${xGrid}
     <path d="${path("a")}" class="c-line c-line-a" fill="none"/>
     <path d="${path("b")}" class="c-line c-line-b" fill="none"/>
-    ${dots("a")}
-    ${dots("b")}
+    ${squares("a")}
+    ${squares("b")}
   </svg>`;
 }

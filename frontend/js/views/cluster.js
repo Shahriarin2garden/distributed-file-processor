@@ -85,17 +85,20 @@ export async function mountCluster(root) {
   const nodeCard = (n, kind, isHead, single) => {
     const res = n.resources || {};
     const alive = !!n.alive;
+    const sel = n.node_id === selectedId;
     return `
-      <button type="button" class="topo-node${alive ? "" : " offline"}${n.node_id === selectedId ? " selected" : ""}"
-        data-node="${escape(n.node_id)}" aria-pressed="${n.node_id === selectedId}">
-        <div class="topo-node-top">
-          <span class="topo-node-kind mono">${kind}</span>
-          <span class="badge tone-${alive ? "ok" : "bad"}"><span class="dot"></span>${alive ? "online" : "offline"}</span>
-        </div>
-        <div class="topo-node-id mono">${escape(shortNode(n.node_id))}</div>
-        <div class="topo-node-meta mono xs dim">
-          ${res.cpu != null ? `${num(res.cpu, 0)} CPU` : "CPU —"}
-          ${res.memory_gb != null ? ` · ${formatNumber(res.memory_gb, 1)} GB` : " · mem —"}
+      <button type="button" class="topo-node${alive ? "" : " offline"}${sel ? " selected" : ""}${kind === "HEAD" ? " head" : ""}"
+        data-node="${escape(n.node_id)}" aria-pressed="${sel}">
+        <div class="topo-node-head mono">${kind}</div>
+        <div class="topo-node-body">
+          <div class="topo-node-top">
+            <span class="topo-node-id mono">${escape(shortNode(n.node_id))}</span>
+            <span class="badge tone-${alive ? "ok" : "bad"}"><span class="dot"></span>${alive ? "online" : "offline"}</span>
+          </div>
+          <div class="topo-node-meta mono xs dim">
+            ${res.cpu != null ? `${num(res.cpu, 0)} CPU` : "CPU —"}
+            ${res.memory_gb != null ? ` · ${formatNumber(res.memory_gb, 1)} GB` : " · mem —"}
+          </div>
         </div>
       </button>`;
   };
@@ -130,8 +133,9 @@ export async function mountCluster(root) {
     render();
   });
 
-  store.subscribe(render);
+  const off = store.subscribe(render);
   render();
+  return off;
 }
 
 function shortNode(id) {

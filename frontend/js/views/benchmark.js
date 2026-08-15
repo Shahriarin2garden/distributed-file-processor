@@ -310,7 +310,7 @@ export async function mountBenchmark(root) {
     })));
   };
 
-  store.subscribe(renderHistory);
+  const off = store.subscribe(renderHistory);
   renderHistory();
 
   (async () => {
@@ -322,6 +322,8 @@ export async function mountBenchmark(root) {
       // study list unavailable — leave the study section idle
     }
   })();
+
+  return off;
 }
 
 function BenchBar({ label, ms, maxMs, tone }) {

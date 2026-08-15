@@ -194,8 +194,9 @@ export async function mountJob(root, jobId) {
     }
   };
 
-  store.subscribe(render);
+  const off = store.subscribe(render);
   render();
+  return off;
 }
 
 // Convert a backend epoch-seconds timestamp to ms (backend stores seconds).

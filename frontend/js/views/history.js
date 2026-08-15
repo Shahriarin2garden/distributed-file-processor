@@ -150,9 +150,10 @@ export async function mountHistory(root) {
     });
   };
 
-  store.subscribe(render);
+  const off = store.subscribe(render);
   if (!store.jobs) store.refreshJobs();
   render();
+  return off;
 }
 
 function escape(s) {

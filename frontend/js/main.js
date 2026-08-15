@@ -106,6 +106,10 @@ async function navigate() {
   }
   store.setRoute(route.path);
   const view = document.getElementById("view");
+  if (typeof window.__dfpUnmount === "function") {
+    try { window.__dfpUnmount(); } catch { /* ignore stale cleanup */ }
+    window.__dfpUnmount = null;
+  }
   const mounts = {
     overview: () => mountOverview(view),
     newjob: () => mountNewJob(view),
@@ -117,7 +121,8 @@ async function navigate() {
     settings: () => mountSettings(view),
   };
   const m = mounts[route.name] || mounts.overview;
-  await m();
+  const cleanup = await m();
+  if (typeof cleanup === "function") window.__dfpUnmount = cleanup;
   window.scrollTo(0, 0);
 }
 
