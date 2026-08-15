@@ -17,7 +17,7 @@ import {
   formatBytes, formatNumber, formatMs, formatElapsed, shortNode,
   formatDateTime, shortId, formatClock,
 } from "../format.js";
-import { renderGraph } from "../execgraph.js";
+import { jobFlow } from "../schematic.js";
 
 const EVENT_LABELS = {
   created: "Job created",
@@ -140,16 +140,30 @@ export async function mountJob(root, jobId) {
       </div></div>
     `));
 
-    // Execution graph — the signature element.
-    pipeline.innerHTML = renderGraph({
-      active: n.status,
-      running: p.active,
-      progress: n.progress,
-      workers: Object.keys(n.workerUsage || {}).length,
-      taskGroups: groupTasksByWorker(tasks),
-      width: 760,
-      height: 260,
-    });
+    // Execution schematic — the Obsidian Flux block-flow over a dot-grid,
+    // matching the overview/architecture diagrams. All numbers are real.
+    const workerGroups = groupTasksByWorker(tasks);
+    const workerChips = Object.entries(workerGroups).map(([id, g]) => ({
+      id,
+      label: id === "__unassigned__" ? "unassigned" : shortNode(id),
+      running: g.running,
+      completed: g.completed,
+      failed: g.failed,
+    }));
+    const hasWorkers = workerChips.length > 0;
+    const executed = p.completed + p.failed + p.retried;
+    pipeline.innerHTML = `<div class="sc-canvas">${jobFlow({
+      split: formatNumber(n.estimatedChunks) + " chunks",
+      dispatch: executed > 0 ? `${formatNumber(executed)} sent` : "—",
+      dispatchSub: "chunks dispatched",
+      execute: formatNumber(p.active) + " active",
+      executeSub: hasWorkers ? `${workerChips.length} worker${workerChips.length > 1 ? "s" : ""}` : "tasks running",
+      aggregate: n.status === "completed" ? formatNumber(n.result, 2) : n.status === "failed" ? "—" : `${Math.round(n.progress)}%`,
+      aggregateSub: n.status === "completed" ? "weighted result" : n.status === "failed" ? "no result" : "progress",
+      isActive,
+      done: n.status === "completed",
+      workerChips: hasWorkers ? workerChips : null,
+    })}</div>`;
 
     // Fault-recovery sequence (demo jobs that experienced a retry).
     faultEl.replaceChildren(renderFaultSequence(tasks, events, isActive));

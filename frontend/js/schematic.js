@@ -6,6 +6,10 @@
 
 import { icon } from "./icons.js";
 
+function escapeAttr(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 const head = (label, extra = "") => `
   <div class="sc-card-head">${extra}<span>${label}</span></div>`;
 
@@ -29,6 +33,45 @@ export function topologyFlow(flow) {
         </div>
       </div>`).join("")}
   </div>`;
+}
+
+// Per-job execution schematic — the same Obsidian Flux block-flow as the
+// overview, but scoped to one job: Split → Dispatch → Execute → Aggregate,
+// with a live worker-chip strip from the real task→worker mapping.
+export function jobFlow(flow) {
+  const nodes = [
+    { label: "Split", tone: "", value: flow.split, sub: "chunks", iconName: "split" },
+    { label: "Dispatch", tone: "accent", value: flow.dispatch, sub: flow.dispatchSub || "chunks / s", iconName: "send" },
+    { label: "Execute", tone: "dash", value: flow.execute, sub: flow.executeSub || "active", iconName: "cpu", live: flow.isActive },
+    { label: "Aggregate", tone: flow.done ? "ok" : "", value: flow.aggregate, sub: flow.aggregateSub || "result", iconName: "folderZip" },
+  ];
+  const workerChips = (flow.workerChips || []).map((w) => {
+    const dots = `${w.running ? `<span class="dot on" title="running"></span>` : ""}${w.completed ? `<span class="dot ok" title="completed"></span>` : ""}${w.failed ? `<span class="dot bad" title="failed"></span>` : ""}`;
+    return `
+      <div class="sc-wchip" title="${escapeAttr(w.id)} ${w.running} run · ${w.completed} ok · ${w.failed} fail">
+        <span class="mono">${escapeAttr(w.label)}</span>
+        <span class="sc-wchip-dots">${dots}</span>
+      </div>`;
+  }).join("");
+
+  return `
+  <div class="sc-flow">
+    ${nodes.map((n, i) => `
+      ${i > 0 ? `<span class="sc-arrow" aria-hidden="true">${icon("arrowForward", 26)}</span>` : ""}
+      <div class="sc-card tone-${n.tone}">
+        ${head(n.label, n.live ? `<span class="sc-live-dot" aria-hidden="true"></span>` : "")}
+        <div class="sc-card-body">
+          <span class="sc-card-icon" aria-hidden="true">${icon(n.iconName, 30)}</span>
+          <span class="sc-card-value mono">${n.value}</span>
+          <span class="sc-card-sub mono">${n.sub}</span>
+        </div>
+      </div>`).join("")}
+  </div>
+  ${workerChips ? `
+    <div class="sc-job-workers">
+      <div class="sc-job-workers-label mono xs dim">workers · real task→node map</div>
+      <div class="sc-job-workers-row">${workerChips}</div>
+    </div>` : ""}`;
 }
 
 // Technical architecture schematic — 4 geometric layers with bold arrows:
