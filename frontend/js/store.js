@@ -6,6 +6,7 @@ import { api } from "./api.js";
 
 const DEFAULT_SETTINGS = {
   apiBase: "",
+  apiKey: "",
   pollSystem: 3000,
   pollJobs: 5000,
   pollJobActive: 1500,

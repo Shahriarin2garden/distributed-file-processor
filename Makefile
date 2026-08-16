@@ -1,4 +1,4 @@
-.PHONY: help build up down restart logs test clean prod-up prod-down prod-logs prod-ps
+.PHONY: help build up down restart logs test clean prod-up prod-down prod-logs prod-ps tunnel
 
 help:
 	@echo "Available commands:"
@@ -13,6 +13,7 @@ help:
 	@echo "  make prod-down - Stop production stack"
 	@echo "  make prod-logs - Follow production logs"
 	@echo "  make prod-ps  - Show production stack status"
+	@echo "  make tunnel   - Open a public HTTPS tunnel to the prod stack (no account)"
 
 build:
 	docker-compose build
@@ -49,3 +50,6 @@ prod-logs:
 
 prod-ps:
 	docker compose --env-file .env.production -f docker-compose.prod.yml ps
+
+tunnel:
+	scripts/run_tunnel.sh --bg

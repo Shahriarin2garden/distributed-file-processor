@@ -24,6 +24,13 @@ export async function mountSettings(root) {
           </div>
           <div class="form-row">
             <label class="field">
+              <span class="field-label">API key</span>
+              <input class="input mono" id="st-api-key" type="password" placeholder="(none)" autocomplete="off" />
+              <span class="field-hint">Required when the backend gates /api/v1/* behind X-API-Key (production). Stored only in your browser.</span>
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
               <span class="field-label">Overview poll interval</span>
               <select class="input" id="st-poll-system">
                 <option value="1000">1 s</option>
@@ -78,6 +85,7 @@ export async function mountSettings(root) {
 
   const s = store.settings;
   root.querySelector("#st-api").value = s.apiBase || "";
+  root.querySelector("#st-api-key").value = s.apiKey || "";
   root.querySelector("#st-poll-system").value = String(s.pollSystem);
   root.querySelector("#st-poll-jobs").value = String(s.pollJobs);
   root.querySelector("#st-poll-job").value = String(s.pollJobActive);
@@ -85,6 +93,7 @@ export async function mountSettings(root) {
   const statusEl = root.querySelector("#st-status");
   root.querySelector("#st-save").addEventListener("click", () => {
     store.settings.apiBase = root.querySelector("#st-api").value.trim();
+    store.settings.apiKey = root.querySelector("#st-api-key").value.trim();
     store.settings.pollSystem = parseInt(root.querySelector("#st-poll-system").value, 10);
     store.settings.pollJobs = parseInt(root.querySelector("#st-poll-jobs").value, 10);
     store.settings.pollJobActive = parseInt(root.querySelector("#st-poll-job").value, 10);

@@ -11,6 +11,15 @@ function baseUrl() {
   }
 }
 
+function apiKey() {
+  try {
+    const raw = localStorage.getItem("dfp.settings");
+    return raw ? (JSON.parse(raw).apiKey || "") : "";
+  } catch {
+    return "";
+  }
+}
+
 function qs(params) {
   const clean = Object.entries(params || {}).filter(([, v]) => v !== undefined && v !== null && v !== "");
   if (!clean.length) return "";
@@ -18,12 +27,15 @@ function qs(params) {
 }
 
 async function req(path, options = {}) {
+  const key = apiKey();
+  const headers = {
+    ...(key ? { "X-API-Key": key } : {}),
+    ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+    ...(options.headers || {}),
+  };
   let res;
   try {
-    res = await fetch(`${baseUrl()}${path}`, {
-      headers: options.body instanceof FormData ? {} : { "Content-Type": "application/json" },
-      ...options,
-    });
+    res = await fetch(`${baseUrl()}${path}`, { ...options, headers });
   } catch {
     const err = new Error("Cannot reach the API. Is the backend running?");
     err.status = 0;
