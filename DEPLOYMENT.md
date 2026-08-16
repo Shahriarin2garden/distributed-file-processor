@@ -22,6 +22,40 @@ Browser (SPA)  ── HTTPS ──>  Reverse proxy (Caddy/Nginx) ──> api :80
 - A domain (recommended) or a public IP.
 - HTTPS termination (recommended; instructions for Caddy included below).
 
+### Free option: Oracle Cloud Always Free (Ampere A1 ARM)
+
+If you have no server yet, the **Always Free** tier on Oracle Cloud gives a
+permanent VM with **2 OCPU / 12 GB RAM** (Ampere A1, ARM64) plus a one-time
+$300 / 30-day trial credit on x86. The stack is pre-tuned for it (see §5).
+
+Provisioning steps:
+
+1. Create a free account at <https://signup.oraclecloud.com> (email + phone +
+   credit/debit card for identity verification — you will **not** be charged).
+2. In the console go to **Compute → Instances → Create instance**.
+3. Image: **Ubuntu 24.04 (Canonical)**, shape: **VM.Standard.A1.Flex**.
+4. Set **2 OCPUs / 12 GB** memory, upload your SSH public key, create a VCN
+   (Oracle offers a "create new VCN" default), and add ingress rules for
+   **TCP 22 (SSH)** and **TCP 80/443 (HTTP/HTTPS)**.
+5. Wait for the instance to reach *Running*, then SSH in:
+
+```bash
+ssh ubuntu@<PUBLIC_IP> -i ~/.ssh/id_ed25519
+```
+
+6. Run the one-shot bootstrap:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Shahriarin2garden/distributed-file-processor/main/scripts/deploy_vps.sh)"
+```
+
+The script installs Docker, clones the repo, generates `.env.production` with
+random secrets, and starts the stack. (Or clone manually and run the script
+from the repo.) The whole pull is ~4 GB, so give it a few minutes.
+
+> **Note:** the free tier has a 4-hour daily reboot window (maintenance) —
+> containers restart automatically thanks to `restart: unless-stopped`.
+
 ## 2. Configure the environment
 
 ```bash
