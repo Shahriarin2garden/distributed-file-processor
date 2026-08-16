@@ -90,10 +90,25 @@ localStorage.setItem("dfp.settings", JSON.stringify({ apiBase: "https://app.exam
 
 ## 5. Scaling
 
+### Always Free (Oracle Ampere A1: 2 OCPU / 12 GB)
+
+The production compose ships pre-tuned for the Always Free instance — the
+head schedules only (`RAY_HEAD_CPUS=0`) plus 2 workers × 1 CPU, using about
+10.5 GB of the 12 GB:
+
+```bash
+RAY_HEAD_CPUS=0
+RAY_WORKER_CPUS=1
+RAY_WORKER_REPLICAS=2
+MAX_CONCURRENT_TASKS=4
+```
+
+### Larger machines
+
 Adjust in `.env.production`:
 
 ```bash
-RAY_HEAD_CPUS=4
+RAY_HEAD_CPUS=2
 RAY_WORKER_CPUS=2
 RAY_WORKER_REPLICAS=4    # scale compute
 MAX_CONCURRENT_TASKS=16  # max parallel Ray tasks

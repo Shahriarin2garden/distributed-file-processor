@@ -19,13 +19,16 @@ name: dfp-prod
 services:
 
   # ── Ray head node (internal network only) ──────────────────────────────
+  # Defaults sized for a 2 OCPU / 12 GB Always Free instance (Ampere A1):
+  # head schedules only (num-cpus 0) + 2 workers x 1 CPU. Raise RAY_* in
+  # .env.production if you deploy on a larger machine.
   ray-head:
     image: rayproject/ray:2.50.0-py311
     command: >
       ray start --head
       --dashboard-host 0.0.0.0
       --ray-client-server-port 10001
-      --num-cpus ${RAY_HEAD_CPUS:-4}
+      --num-cpus ${RAY_HEAD_CPUS:-0}
       --block
     # Uncomment the next two lines only if you want the Ray dashboard reachable
     # from the host (e.g. behind a VPN). It is NOT meant for public exposure.
@@ -48,13 +51,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${RAY_HEAD_CPUS:-4}"
-          memory: 4g
+          cpus: "${RAY_HEAD_CPUS:-0}"
+          memory: 2g
 
   # ── Ray workers ──────────────────────────────────────────────────────────
   ray-worker:
     image: rayproject/ray:2.50.0-py311
-    command: ray start --address='ray-head:6379' --num-cpus ${RAY_WORKER_CPUS:-2} --block
+    command: ray start --address='ray-head:6379' --num-cpus ${RAY_WORKER_CPUS:-1} --block
     depends_on:
       ray-head:
         condition: service_healthy
@@ -70,8 +73,8 @@ services:
       replicas: ${RAY_WORKER_REPLICAS:-2}
       resources:
         limits:
-          cpus: "${RAY_WORKER_CPUS:-2}"
-          memory: 4g
+          cpus: "${RAY_WORKER_CPUS:-1}"
+          memory: 3g
 
   # ── Application Redis (internal only, password + AOF persistence) ────────
   redis:
@@ -114,7 +117,7 @@ services:
       - S3_BUCKET_NAME=${S3_BUCKET_NAME:-}
       - S3_REGION=${S3_REGION:-us-east-1}
       - CHUNK_SIZE_ROWS=${CHUNK_SIZE_ROWS:-50000}
-      - MAX_CONCURRENT_TASKS=${MAX_CONCURRENT_TASKS:-8}
+      - MAX_CONCURRENT_TASKS=${MAX_CONCURRENT_TASKS:-4}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-500}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:?ALLOWED_ORIGINS must be set in .env.production (your app domain)}
       - API_KEY_SECRET=${API_KEY_SECRET:?API_KEY_SECRET must be set in .env.production}
