@@ -9,7 +9,9 @@ pydantic==2.5.3
 pydantic-settings==2.1.0
 
 # Distributed computing
-ray[default]==2.9.2
+# 2.50.0: latest line with both amd64 AND arm64/v8 Docker images (required
+# for Oracle Cloud Always Free / Ampere A1 ARM deployment)
+ray[default]==2.50.0
 
 # Caching / job state
 redis==5.0.1

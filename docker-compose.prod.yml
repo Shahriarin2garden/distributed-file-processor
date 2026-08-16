@@ -20,7 +20,7 @@ services:
 
   # ── Ray head node (internal network only) ──────────────────────────────
   ray-head:
-    image: rayproject/ray:2.9.2-py311
+    image: rayproject/ray:2.50.0-py311
     command: >
       ray start --head
       --dashboard-host 0.0.0.0
@@ -53,7 +53,7 @@ services:
 
   # ── Ray workers ──────────────────────────────────────────────────────────
   ray-worker:
-    image: rayproject/ray:2.9.2-py311
+    image: rayproject/ray:2.50.0-py311
     command: ray start --address='ray-head:6379' --num-cpus ${RAY_WORKER_CPUS:-2} --block
     depends_on:
       ray-head:

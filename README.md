@@ -173,7 +173,7 @@ flowchart TB
 | Component | Technology |
 | --- | --- |
 | API layer | FastAPI 0.109, Uvicorn |
-| Distributed compute | Ray 2.9.2 (remote functions + actor model) |
+| Distributed compute | Ray 2.50.0 (remote functions + actor model) |
 | Job state / caching | Redis 7 |
 | Data processing | Pandas 2.2 |
 | Web UI | Vanilla JS (ES modules) + CSS, no build step — served by FastAPI `/static` |
@@ -266,7 +266,7 @@ distributed-file-processor/
 ## Prerequisites
 
 - Docker and Docker Compose v2
-- Python 3.11 for local development outside Docker (Ray 2.9.2 does not support Python 3.12+)
+- Python 3.11 for local development outside Docker (or any Python ≥3.9 supported by Ray 2.50.0)
 - 4 GB RAM minimum for the Ray head node plus two workers
 
 ---

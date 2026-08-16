@@ -6,7 +6,7 @@ Production-ready distributed CSV/JSON processing system using Ray for parallel c
 ## Technical Highlights
 
 ### Core Technologies
-- **Ray 2.9.2**: Distributed computing framework
+- **Ray 2.50.0**: Distributed computing framework
 - **FastAPI**: Async REST API framework
 - **Redis**: Job metadata and result caching
 - **Docker Compose**: Multi-container orchestration

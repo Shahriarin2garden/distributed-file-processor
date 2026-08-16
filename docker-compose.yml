@@ -2,7 +2,7 @@ services:
 
   # ── Ray head node (GCS on :6379, dashboard on :8265, client on :10001) ──
   ray-head:
-    image: rayproject/ray:2.9.2-py311
+    image: rayproject/ray:2.50.0-py311
     command: >
       ray start --head
       --dashboard-host 0.0.0.0
@@ -28,7 +28,7 @@ services:
 
   # ── Ray workers ──────────────────────────────────────────────────────────
   ray-worker:
-    image: rayproject/ray:2.9.2-py311
+    image: rayproject/ray:2.50.0-py311
     # Workers connect to head GCS port (6379 inside ray-head container).
     # ./app is mounted so remote task modules are importable on the workers.
     command: ray start --address='ray-head:6379' --num-cpus 2 --block
