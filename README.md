@@ -364,21 +364,21 @@ curl http://localhost:8000/health
 
 Other helpers: `make prod-down`, `make prod-logs`, `make prod-ps`.
 
-### Free-tier deployment (Oracle Cloud Always Free)
+### Free-tier deployment (Azure for Students)
 
-The stack is tuned to run on an **Always Free** Oracle Cloud Ampere A1 ARM
-instance (2 OCPU / 12 GB — see [DEPLOYMENT.md](DEPLOYMENT.md) §5):
+The stack is tuned to run on an **Azure B2ms** student VM (2 vCPU / 8 GB —
+see [DEPLOYMENT.md](DEPLOYMENT.md) §5):
 
 ```bash
-# On the VPS, after cloning the repo:
+# On the VM, after cloning the repo:
 cp .env.production.example .env.production   # fill secrets
 make prod-up
 ```
 
 Ray 2.50.0 is used specifically because it ships both `linux/amd64` and
-`linux/arm64/v8` Docker images (Ray 2.9.x is amd64-only and will not start on
-Ampere). The production compose defaults to 2 workers × 1 CPU with the head
-scheduling only, fitting comfortably in 12 GB of RAM.
+`linux/arm64/v8` Docker images (Ray 2.9.x is amd64-only). The production
+compose defaults to 2 workers × 1 CPU with the head scheduling only, fitting
+comfortably in 8 GB of RAM.
 
 ---
 

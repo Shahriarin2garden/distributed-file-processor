@@ -1,7 +1,7 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# deploy_vps.sh — bootstrap a fresh Oracle Cloud Always Free instance (or any
-# Ubuntu 22.04/24.04 VM) to run the Distributed File Processing System.
+# deploy_vps.sh — bootstrap a fresh Azure for Students VM (or any Ubuntu
+# 22.04/24.04 server) to run the Distributed File Processing System.
 #
 # Run as root (or with sudo) on a brand-new instance:
 #

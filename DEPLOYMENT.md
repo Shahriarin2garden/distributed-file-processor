@@ -22,25 +22,28 @@ Browser (SPA)  ── HTTPS ──>  Reverse proxy (Caddy/Nginx) ──> api :80
 - A domain (recommended) or a public IP.
 - HTTPS termination (recommended; instructions for Caddy included below).
 
-### Free option: Oracle Cloud Always Free (Ampere A1 ARM)
+### Free option: Azure for Students (via GitHub Student Developer Pack)
 
-If you have no server yet, the **Always Free** tier on Oracle Cloud gives a
-permanent VM with **2 OCPU / 12 GB RAM** (Ampere A1, ARM64) plus a one-time
-$300 / 30-day trial credit on x86. The stack is pre-tuned for it (see §5).
+No server yet? If you have the **GitHub Student Developer Pack**, you can get
+**Azure for Students** — $100 of credit plus free access to 25+ Azure services,
+**no credit card required** (18+). The stack is pre-tuned for a **B2ms**
+(2 vCPU / 8 GB) VM — see §5.
 
 Provisioning steps:
 
-1. Create a free account at <https://signup.oraclecloud.com> (email + phone +
-   credit/debit card for identity verification — you will **not** be charged).
-2. In the console go to **Compute → Instances → Create instance**.
-3. Image: **Ubuntu 24.04 (Canonical)**, shape: **VM.Standard.A1.Flex**.
-4. Set **2 OCPUs / 12 GB** memory, upload your SSH public key, create a VCN
-   (Oracle offers a "create new VCN" default), and add ingress rules for
-   **TCP 22 (SSH)** and **TCP 80/443 (HTTP/HTTPS)**.
-5. Wait for the instance to reach *Running*, then SSH in:
+1. Redeem your benefit at <https://education.github.com/pack> (Azure section) to
+   get an activation code. Then sign up at
+   `https://signup.azure.com/studentverification?offerType=1`, sign in with
+   GitHub, and paste the code. (Use that link — the regular Azure "Start free"
+   page always asks for a card.)
+2. In the Azure portal go to **Virtual machines → Create → Azure virtual machine**.
+3. Image: **Ubuntu 24.04 LTS** (Canonical), size: **Standard_B2ms** (2 vCPU / 8 GB).
+4. Create or reuse a resource group; generate an SSH key pair (or upload one).
+   Add inbound rules for **TCP 22 (SSH)** and **TCP 80/443** in the NSG.
+5. Once the VM is *Running*, SSH in:
 
 ```bash
-ssh ubuntu@<PUBLIC_IP> -i ~/.ssh/id_ed25519
+ssh azureuser@<PUBLIC_IP> -i ~/.ssh/id_ed25519
 ```
 
 6. Run the one-shot bootstrap:
@@ -53,8 +56,10 @@ The script installs Docker, clones the repo, generates `.env.production` with
 random secrets, and starts the stack. (Or clone manually and run the script
 from the repo.) The whole pull is ~4 GB, so give it a few minutes.
 
-> **Note:** the free tier has a 4-hour daily reboot window (maintenance) —
-> containers restart automatically thanks to `restart: unless-stopped`.
+> **Budget note:** a B2ms running 24/7 costs roughly $60/month, so the $100
+> credit lasts ~1.7 months. Stop/deallocate the VM when you are not using it to
+> stretch the credit, or downsize to a **B2s** (4 GB, ~$30/mo) and reduce
+> `RAY_WORKER_REPLICAS=1` to fit.
 
 ## 2. Configure the environment
 
@@ -124,11 +129,11 @@ localStorage.setItem("dfp.settings", JSON.stringify({ apiBase: "https://app.exam
 
 ## 5. Scaling
 
-### Always Free (Oracle Ampere A1: 2 OCPU / 12 GB)
+### Azure B2ms (2 vCPU / 8 GB) — default tuning
 
-The production compose ships pre-tuned for the Always Free instance — the
-head schedules only (`RAY_HEAD_CPUS=0`) plus 2 workers × 1 CPU, using about
-10.5 GB of the 12 GB:
+The production compose ships pre-tuned for an Azure B2ms student VM — the head
+schedules only (`RAY_HEAD_CPUS=0`) plus 2 workers × 1 CPU, about 7.75 GB of
+the 8 GB:
 
 ```bash
 RAY_HEAD_CPUS=0

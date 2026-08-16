@@ -19,9 +19,9 @@ name: dfp-prod
 services:
 
   # ── Ray head node (internal network only) ──────────────────────────────
-  # Defaults sized for a 2 OCPU / 12 GB Always Free instance (Ampere A1):
-  # head schedules only (num-cpus 0) + 2 workers x 1 CPU. Raise RAY_* in
-  # .env.production if you deploy on a larger machine.
+  # Defaults sized for an Azure B2ms (2 vCPU / 8 GB) student VM:
+  # head schedules only (num-cpus 0) + 2 workers x 1 CPU, ~7.3 GB total.
+  # Raise RAY_* in .env.production if you deploy on a larger machine.
   ray-head:
     image: rayproject/ray:2.50.0-py311
     command: >
@@ -52,7 +52,7 @@ services:
       resources:
         limits:
           cpus: "${RAY_HEAD_CPUS:-0}"
-          memory: 2g
+          memory: 1.5g
 
   # ── Ray workers ──────────────────────────────────────────────────────────
   ray-worker:
@@ -74,7 +74,7 @@ services:
       resources:
         limits:
           cpus: "${RAY_WORKER_CPUS:-1}"
-          memory: 3g
+          memory: 2.5g
 
   # ── Application Redis (internal only, password + AOF persistence) ────────
   redis:
@@ -97,7 +97,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          memory: 256m
 
   # ── FastAPI application ──────────────────────────────────────────────────
   api:
@@ -142,7 +142,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 1g
 
 volumes:
   redis-data:
