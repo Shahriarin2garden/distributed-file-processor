@@ -22,6 +22,37 @@ Browser (SPA)  ── HTTPS ──>  Reverse proxy (Caddy/Nginx) ──> api :80
 - A domain (recommended) or a public IP.
 - HTTPS termination (recommended; instructions for Caddy included below).
 
+### Free option: stable URL with a Student Pack domain + Cloudflare (no card, no VPS)
+
+The cheapest real deployment — a stable `https://dfp.<yourname>.<tld>` URL with
+free SSL, using only free credits from the **GitHub Student Developer Pack**
+and a free **Cloudflare** account (no credit card anywhere):
+
+1. **Get a free domain** for 1 year from your Student Pack:
+   - Name.com → https://www.name.com/github-students (`.dev`, `.app`, `.live`, …)
+   - or Namecheap → https://nc.me/landing/github (`.me` + free SSL)
+2. **Add it to Cloudflare** (free plan, no card): sign up at
+   https://dash.cloudflare.com, add the zone, and point your nameservers at
+   Cloudflare as instructed.
+3. **Log in to cloudflared** (opens a browser, one time):
+   ```bash
+   ~/.local/bin/cloudflared tunnel login
+   ```
+4. **Create the named tunnel + DNS route**:
+   ```bash
+   ./scripts/setup_named_tunnel.sh dfp yourname dev   # -> https://dfp.yourname.dev
+   ```
+5. **Make it survive reboots** (WSL2 with systemd):
+   ```bash
+   sudo ./scripts/install_tunnel_service.sh
+   ```
+
+The stack runs on your machine (must stay powered), Cloudflare terminates TLS
+at the edge, and the tunnel carries traffic to `localhost:8100`.
+
+> **Tradeoff:** this is free but not *cloud* hosting — the machine must stay
+> on. For a true always-on server you still need a VPS (card/credits required).
+
 ### Free option: Azure for Students (via GitHub Student Developer Pack)
 
 No server yet? If you have the **GitHub Student Developer Pack**, you can get
