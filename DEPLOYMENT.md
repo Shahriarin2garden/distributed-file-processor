@@ -92,6 +92,60 @@ from the repo.) The whole pull is ~4 GB, so give it a few minutes.
 > stretch the credit, or downsize to a **B2s** (4 GB, ~$30/mo) and reduce
 > `RAY_WORKER_REPLICAS=1` to fit.
 
+### Recommended option: Oracle Cloud Always Free (Ampere A1 ARM) — migrate off the laptop
+
+Unlike Azure's credit or AWS's 12-month tier, Oracle's **Always Free** ARM
+instance (up to 4 OCPU / 24 GB) never expires and needs **no credit card on
+the running stack**. This is the recommended target when you want true 24/7
+availability without paying. Ray 2.50.0 was pinned specifically because it
+ships native `linux/arm64` Docker images for this platform.
+
+Migration preserves everything — the same domain, API key, and Redis password
+— because the Cloudflare **named tunnel** and `.env.production` are moved
+wholesale. No DNS changes, no client-side key updates.
+
+**A. On the laptop — build the migration bundle** (packages `.env.production`
++ the tunnel credentials, never touches the repo):
+
+```bash
+./scripts/prepare_oracle_bundle.sh      # -> /tmp/dfp-oracle-bundle.tar.gz
+```
+
+**B. Provision the Oracle instance (one-time, needs your account):**
+
+1. Sign up at https://signup.oraclecloud.com (free, card required for identity
+   verification only; Always Free resources are never billed).
+2. Console → **Compute → Instances → Create instance**.
+3. Image: **Canonical Ubuntu 22.04/24.04** (arm64). Shape: **VM.Standard.A1.Flex**,
+   2–4 OCPU / 12–24 GB RAM (stay within the Always Free envelope).
+4. **Add SSH keys**: paste the contents of `~/.ssh/oracle_id.pub` (or upload).
+5. Leave the default VCN/NSG (SSH on 22 from your IP is enough; the app is
+   reached only through the Cloudflare tunnel, so no public 80/443 needed).
+6. Note the public IP. If A1 reports "out of capacity", switch region and retry.
+
+**C. Transfer the bundle and bootstrap:**
+
+```bash
+scp -i ~/.ssh/oracle_id /tmp/dfp-oracle-bundle.tar.gz ubuntu@<PUBLIC_IP>:~
+ssh -i ~/.ssh/oracle_id ubuntu@<PUBLIC_IP>
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Shahriarin2garden/distributed-file-processor/main/scripts/migrate_oracle.sh)" /home/ubuntu/dfp-oracle-bundle.tar.gz
+```
+
+The script installs Docker + cloudflared, restores secrets, rebuilds the stack,
+and registers `dfp-tunnel.service` (auto-start on boot). The VM now serves
+`https://dfp.dfpsh.me` — verify with `curl https://dfp.dfpsh.me/health`.
+
+**D. Retire the laptop as the origin** once the VM is healthy:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml down
+systemctl --user stop dfp-tunnel.service dfp-prod.service   # stop auto-restart
+```
+
+> Two named-tunnel replicas (laptop + VM) can briefly serve the same hostname
+> during cutover — that is fine; Cloudflare load-balances them. Stop the laptop
+> side when the VM is confirmed healthy to make it the single origin.
+
 ## 2. Configure the environment
 
 ```bash
