@@ -92,13 +92,14 @@ from the repo.) The whole pull is ~4 GB, so give it a few minutes.
 > stretch the credit, or downsize to a **B2s** (4 GB, ~$30/mo) and reduce
 > `RAY_WORKER_REPLICAS=1` to fit.
 
-### Recommended option: Oracle Cloud Always Free (Ampere A1 ARM) — migrate off the laptop
+### Recommended option: Azure for Students B2ms — migrate off the laptop (no card)
 
-Unlike Azure's credit or AWS's 12-month tier, Oracle's **Always Free** ARM
-instance (up to 4 OCPU / 24 GB) never expires and needs **no credit card on
-the running stack**. This is the recommended target when you want true 24/7
-availability without paying. Ray 2.50.0 was pinned specifically because it
-ships native `linux/arm64` Docker images for this platform.
+If you have the **GitHub Student Developer Pack**, Azure for Students is the
+only truly **no-credit-card** path to an always-on VM (identity is verified by
+your institution instead). The production compose is pre-tuned for a **B2ms**
+(2 vCPU / 8 GB) — exactly what this section targets. The same migration works
+on Oracle's Always Free Ampere A1 ARM box too (`migrate_vm.sh` auto-detects
+amd64/arm64; Ray 2.50.0 was pinned for its `linux/arm64` images).
 
 Migration preserves everything — the same domain, API key, and Redis password
 — because the Cloudflare **named tunnel** and `.env.production` are moved
@@ -108,27 +109,28 @@ wholesale. No DNS changes, no client-side key updates.
 + the tunnel credentials, never touches the repo):
 
 ```bash
-./scripts/prepare_oracle_bundle.sh      # -> /tmp/dfp-oracle-bundle.tar.gz
+./scripts/prepare_migration_bundle.sh   # -> /tmp/dfp-migration-bundle.tar.gz
 ```
 
-**B. Provision the Oracle instance (one-time, needs your account):**
+**B. Provision the Azure VM (one-time, needs your account):**
 
-1. Sign up at https://signup.oraclecloud.com (free, card required for identity
-   verification only; Always Free resources are never billed).
-2. Console → **Compute → Instances → Create instance**.
-3. Image: **Canonical Ubuntu 22.04/24.04** (arm64). Shape: **VM.Standard.A1.Flex**,
-   2–4 OCPU / 12–24 GB RAM (stay within the Always Free envelope).
-4. **Add SSH keys**: paste the contents of `~/.ssh/oracle_id.pub` (or upload).
-5. Leave the default VCN/NSG (SSH on 22 from your IP is enough; the app is
-   reached only through the Cloudflare tunnel, so no public 80/443 needed).
-6. Note the public IP. If A1 reports "out of capacity", switch region and retry.
+1. Redeem Azure for Students at
+   `https://signup.azure.com/studentverification?offerType=1` (sign in with
+   GitHub, paste the activation code from the Student Pack) — **no card**.
+2. Portal → **Virtual machines → Create → Azure virtual machine**.
+3. Image: **Ubuntu 24.04 LTS** (Canonical). Size: **Standard_B2ms** (2 vCPU / 8 GB).
+4. SSH key: **Upload existing** → paste the contents of `~/.ssh/oracle_id.pub`
+   (the migration key generated on the laptop).
+5. In the network security group add inbound **TCP 22 (SSH)** from your IP
+   (the app is reached only through the Cloudflare tunnel — no public 80/443).
+6. Once *Running*, note the public IP.
 
 **C. Transfer the bundle and bootstrap:**
 
 ```bash
-scp -i ~/.ssh/oracle_id /tmp/dfp-oracle-bundle.tar.gz ubuntu@<PUBLIC_IP>:~
-ssh -i ~/.ssh/oracle_id ubuntu@<PUBLIC_IP>
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Shahriarin2garden/distributed-file-processor/main/scripts/migrate_oracle.sh)" /home/ubuntu/dfp-oracle-bundle.tar.gz
+scp -i ~/.ssh/oracle_id /tmp/dfp-migration-bundle.tar.gz azureuser@<PUBLIC_IP>:~
+ssh -i ~/.ssh/oracle_id azureuser@<PUBLIC_IP>
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Shahriarin2garden/distributed-file-processor/main/scripts/migrate_vm.sh)" /home/azureuser/dfp-migration-bundle.tar.gz
 ```
 
 The script installs Docker + cloudflared, restores secrets, rebuilds the stack,
@@ -145,6 +147,11 @@ systemctl --user stop dfp-tunnel.service dfp-prod.service   # stop auto-restart
 > Two named-tunnel replicas (laptop + VM) can briefly serve the same hostname
 > during cutover — that is fine; Cloudflare load-balances them. Stop the laptop
 > side when the VM is confirmed healthy to make it the single origin.
+>
+> **Budget note:** a B2ms running 24/7 costs roughly $60/month, so the $100
+> credit lasts ~1.7 months. Deallocate the VM when you are not using it to
+> stretch the credit, or downsize to a **B2s** (4 GB, ~$30/mo) and set
+> `RAY_WORKER_REPLICAS=1` to fit.
 
 ## 2. Configure the environment
 

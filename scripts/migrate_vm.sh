@@ -1,13 +1,14 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# migrate_oracle.sh — bootstrap the Distributed File Processing System on a
-# fresh Oracle Cloud Always Free instance (Ampere A1, Ubuntu 22.04/24.04 ARM),
-# taking over the Cloudflare named tunnel + production stack from the laptop.
+# migrate_vm.sh — bootstrap the Distributed File Processing System on a fresh
+# always-on VM (Azure for Students B2ms, Oracle Ampere A1, or any Ubuntu
+# server), taking over the Cloudflare named tunnel + production stack from
+# the laptop. Works on both amd64 and arm64.
 #
 # Run as root on the new VM:
-#   sudo bash scripts/migrate_oracle.sh /home/ubuntu/dfp-oracle-bundle.tar.gz
+#   sudo bash scripts/migrate_vm.sh /home/azureuser/dfp-migration-bundle.tar.gz
 #
-# The bundle is produced by scripts/prepare_oracle_bundle.sh on the laptop
+# The bundle is produced by scripts/prepare_migration_bundle.sh on the laptop
 # (contains .env.production + the Cloudflare tunnel credentials). It is
 # extracted into /opt/dfp, so the VM serves the SAME domain, API key, and
 # Redis password as before — no DNS changes, no client-side key updates.
@@ -18,7 +19,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-BUNDLE="${1:-/home/ubuntu/dfp-oracle-bundle.tar.gz}"
+BUNDLE="${1:-/home/azureuser/dfp-migration-bundle.tar.gz}"
 GIT_URL="${GIT_URL:-https://github.com/Shahriarin2garden/distributed-file-processor.git}"
 APP_DIR="${APP_DIR:-/opt/dfp}"
 TUNNEL_USER="${TUNNEL_USER:-root}"
