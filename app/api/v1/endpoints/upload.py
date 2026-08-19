@@ -1,5 +1,6 @@
 import datetime
 import uuid
+from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -21,6 +22,7 @@ _ALLOWED_CONTENT_TYPES = {
     "text/plain",
     "application/json",
     "text/json",
+    "application/x-ndjson",
     "application/octet-stream",  # common browser fallback
 }
 _EXTENSION_MAP = {
@@ -29,8 +31,28 @@ _EXTENSION_MAP = {
     "text/plain": "csv",
     "application/json": "json",
     "text/json": "json",
+    "application/x-ndjson": "json",
     "application/octet-stream": "csv",
 }
+_EXTENSION_FROM_NAME = {
+    ".csv": "csv",
+    ".json": "json",
+    ".jsonl": "json",
+    ".ndjson": "json",
+}
+
+
+def _detect_extension(filename: str, content_type: str) -> str:
+    """Detect file type by filename first, content-type as fallback.
+
+    Browsers often send JSON/JSON-Lines uploads with a generic content
+    type (text/plain, application/octet-stream), so trusting the filename
+    avoids misclassifying them as CSV.
+    """
+    ext = _EXTENSION_FROM_NAME.get(Path(filename).suffix.lower())
+    if ext:
+        return ext
+    return _EXTENSION_MAP.get(content_type, "csv")
 
 
 def _create_job(
@@ -90,11 +112,11 @@ def _create_job(
                 status_code=400, detail="demo_fail_chunks must be comma-separated integers"
             )
 
-    file_ext = _EXTENSION_MAP.get(content_type, "csv")
+    file_ext = _detect_extension(filename, content_type)
     job_id = str(uuid.uuid4())
     file_path = storage_service.save_uploaded_file(job_id, file_data, extension=file_ext)
 
-    if file_ext == "json":
+    if file_ext == "json" or file_ext == "jsonl":
         inspection = chunker_service.inspect_json(file_path, chunk_size_rows)
     else:
         inspection = chunker_service.inspect_csv(file_path, chunk_size_rows)
@@ -186,11 +208,11 @@ async def inspect_file(
     if len(file_data) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    file_ext = _EXTENSION_MAP.get(content_type, "csv")
+    file_ext = _detect_extension(file.filename, content_type)
     job_id = str(uuid.uuid4())
     file_path = storage_service.save_uploaded_file(job_id, file_data, extension=file_ext)
 
-    if file_ext == "json":
+    if file_ext == "json" or file_ext == "jsonl":
         inspection = chunker_service.inspect_json(file_path, chunk_size_rows)
     else:
         inspection = chunker_service.inspect_csv(file_path, chunk_size_rows)

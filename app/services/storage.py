@@ -6,7 +6,7 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-_ALLOWED_EXTENSIONS = {"csv", "json"}
+_ALLOWED_EXTENSIONS = {"csv", "json", "jsonl"}
 
 
 class StorageService:

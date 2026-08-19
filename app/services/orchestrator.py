@@ -60,9 +60,10 @@ class Orchestrator:
             # Determine file type and split into chunks
             file_ext = metadata.get("file_extension", "csv")
             file_path = storage_service.get_raw_file_path(job_id, extension=file_ext)
+            is_json = file_ext in {"json", "jsonl"}
 
             loop = asyncio.get_event_loop()
-            if file_ext == "json":
+            if is_json:
                 chunk_paths = await loop.run_in_executor(
                     None,
                     chunker_service.split_json,
