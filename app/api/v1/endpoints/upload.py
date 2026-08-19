@@ -42,6 +42,23 @@ _EXTENSION_FROM_NAME = {
 }
 
 
+async def _read_upload_bounded(upload_file: UploadFile, max_bytes: int) -> bytes:
+    """Read an upload in chunks, aborting early once the size limit is hit.
+
+    Reads the stream incrementally instead of buffering the whole body first,
+    so an oversized upload is rejected with 413 before it consumes memory.
+    """
+    buffer = bytearray()
+    while chunk := await upload_file.read(64 * 1024):
+        buffer.extend(chunk)
+        if len(buffer) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds the {settings.max_file_size_mb} MB limit",
+            )
+    return bytes(buffer)
+
+
 def _detect_extension(filename: str, content_type: str) -> str:
     """Detect file type by filename first, content-type as fallback.
 
@@ -165,7 +182,8 @@ async def upload_file(
 ) -> UploadResponse:
     # content-type validation happens inside _create_job
     content_type = (file.content_type or "application/octet-stream").split(";")[0].strip()
-    file_data = await file.read()
+    max_bytes = settings.max_file_size_mb * 1024 * 1024
+    file_data = await _read_upload_bounded(file, max_bytes)
     return _create_job(
         file_data=file_data,
         filename=file.filename,
@@ -198,13 +216,7 @@ async def inspect_file(
             status_code=400, detail="chunk_size_rows must be between 1 and 500 000"
         )
 
-    file_data = await file.read()
-    max_bytes = settings.max_file_size_mb * 1024 * 1024
-    if len(file_data) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File exceeds the {settings.max_file_size_mb} MB limit",
-        )
+    file_data = await _read_upload_bounded(file, settings.max_file_size_mb * 1024 * 1024)
     if len(file_data) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 

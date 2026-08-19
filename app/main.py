@@ -4,13 +4,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import ray
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.config import settings
+from app.middleware import APIKeyMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware
 from app.utils.logger import setup_logger
 from app.utils.redis_client import redis_client
 
@@ -62,34 +63,9 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
-
-
-@app.middleware("http")
-async def api_key_middleware(request: Request, call_next):
-    """Optional API key gate. Disabled when API_KEY_SECRET is unset.
-
-    Browser requests from an allowed origin (the SPA) pass through without
-    the key so the public UI works for real users; direct API calls from
-    scripts/curl still require X-API-Key.
-    """
-    if settings.api_key_secret:
-        public_paths = {"/health", "/docs", "/openapi.json", "/redoc", "/"}
-        if request.url.path not in public_paths and not request.url.path.startswith("/static"):
-            origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
-            origin = origin.rstrip("/")
-            allowed = {o.rstrip("/") for o in settings.allowed_origins.split(",")}
-            from_ui = any(origin == o or origin.startswith(o + "/") for o in allowed if o)
-            key = request.headers.get("X-API-Key")
-            if not from_ui and (not key or key != settings.api_key_secret):
-                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-    response = await call_next(request)
-    # Never let the browser keep stale UI assets: the SPA and its ES-module
-    # graph are revalidated on every load so diagram redesigns show up
-    # immediately after a container rebuild.
-    if request.url.path == "/" or request.url.path.startswith("/static"):
-        response.headers["Cache-Control"] = "no-store, max-age=0"
-    return response
-
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(APIKeyMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(api_router, prefix="/api/v1")
 

@@ -90,6 +90,7 @@ flowchart TB
     end
 
     subgraph API["FastAPI Gateway :8000"]
+        MW["Middleware<br/>X-API-Key gate · Redis rate limit<br/>CSP · security headers · HSTS"]
         GW["REST API /api/v1/*"]
         ORCH["Orchestrator (background task)"]
     end
@@ -119,7 +120,8 @@ flowchart TB
         S3["S3 (optional)"]
     end
 
-    UI -->|HTTPS| GW
+    UI -->|HTTPS · X-API-Key| MW
+    MW --> GW
     GW -->|upload / inspect / process / status / result / jobs / system| ORCH
     ORCH --> CH
     ORCH --> DISP
@@ -133,6 +135,8 @@ flowchart TB
     ORCH -->|read / write files| LS
     ORCH -.->|optional| S3
 ```
+
+A rendered copy of the same topology is available as **[`docs/architecture.png`](docs/architecture.png)** (editable source: `docs/architecture.excalidraw`).
 
 ### Processing flow for a single job
 
@@ -190,7 +194,8 @@ flowchart TB
 distributed-file-processor/
 |
 |-- app/
-|   |-- main.py                  FastAPI app, lifespan (Ray init/shutdown), CORS, API-key + no-store cache middleware
+|   |-- main.py                  FastAPI app, lifespan (Ray init/shutdown), CORS, middleware wiring, SPA serving
+|   |-- middleware.py             SecurityHeaders + API-key gate + Redis rate-limit middleware
 |   |-- config.py                Environment-based settings via pydantic-settings
 |   |-- models/
 |   |   `-- job.py               Pydantic request/response models and status enums
@@ -340,7 +345,9 @@ Production runs a separate, hardened stack — see **[DEPLOYMENT.md](DEPLOYMENT.
 | Production control | How |
 | --- | --- |
 | Non-root process | API image runs as UID 999 (`USER app`), `tini` as PID 1, no `--reload` |
-| API-key gate | Every `/api/v1/*` request requires `X-API-Key: <value>` |
+| API-key gate | Every `/api/v1/*` request requires `X-API-Key: <value>` — no origin/referer bypass |
+| Rate limiting | Redis fixed-window limiter on `POST /api/v1/*` (`RATE_LIMIT_PER_MINUTE`) |
+| Security headers | CSP, `X-Content-Type-Options`, `X-Frame-Options: DENY`, HSTS, Referrer-Policy |
 | CORS allow-list | `ALLOWED_ORIGINS` must be your real domain(s), never `*` |
 | Redis protection | `REDIS_PASSWORD` + AOF persistence on named volume `dfp-redis-data` |
 | No internal exposure | Ray dashboard / client and Redis are **not** published on the host |
@@ -398,6 +405,9 @@ All settings are loaded from environment variables or a `.env` file in the proje
 | `MAX_FILE_SIZE_MB` | `500` | Upload size limit in megabytes |
 | `ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins. Set to your domain in production |
 | `API_KEY_SECRET` | unset | If set, all `/api/v1/*` requests require `X-API-Key: <value>` header |
+| `RATE_LIMIT_PER_MINUTE` | `0` | Max `POST` requests per minute per IP (Redis fixed window). `0` disables |
+| `CSP_CONNECT_SRC` | `'self'` | Extra sources appended to the `connect-src` CSP directive (e.g. your API host) |
+| `ALLOW_HSTS` | `true` | Emit `Strict-Transport-Security` (disable when serving behind HTTP-only hosts) |
 | `AWS_ACCESS_KEY_ID` | unset | Required when `STORAGE_TYPE=s3` |
 | `AWS_SECRET_ACCESS_KEY` | unset | Required when `STORAGE_TYPE=s3` |
 | `S3_BUCKET_NAME` | unset | S3 bucket name |
@@ -678,10 +688,14 @@ redis-cli -p 6380 keys "job:*"
 | Control | Implementation |
 | --- | --- |
 | CORS | Configurable via `ALLOWED_ORIGINS`. Default `*` is suitable for development only. Set to specific domains in production. |
-| API key authentication | Optional. Set `API_KEY_SECRET` to require `X-API-Key` on all `/api/v1/*` endpoints. Docs and health check remain public. |
+| API key authentication | Set `API_KEY_SECRET` to require `X-API-Key` on all `/api/v1/*` endpoints. The check uses the header value directly — an attacker-supplied `Origin`/`Referer` cannot bypass it. Docs and health check remain public. |
+| Rate limiting | `RATE_LIMIT_PER_MINUTE` caps `POST` requests per IP per minute using a Redis fixed-window counter. `0` disables. |
+| Security headers | CSP, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, HSTS, Referrer-Policy, Permissions-Policy sent on every response. |
+| Upload streaming | Upload bodies are read in bounded 64 KiB chunks; oversized files return `413` without buffering the whole file in memory. |
 | File type validation | Upload endpoint validates `Content-Type` against an allowlist. Unsupported types return `415`. |
 | File size limit | Configurable via `MAX_FILE_SIZE_MB`. Oversized uploads return `413` before any disk write. |
 | Path traversal | Raw files are stored as `<UUID>.<ext>` with no user-supplied path components. |
+| Raw-file cleanup | Raw uploads are deleted from storage once a job reaches a terminal state (`completed` / `failed`). |
 | Error exposure | Exception messages returned to clients are truncated to 200 characters with no stack traces. |
 | Redis write safety | Progress updates use `WATCH`/`MULTI`/`EXEC` (optimistic locking) to prevent race conditions. |
 | Redis password | `REDIS_PASSWORD` merged into the connection URL — never logged; required in production. |

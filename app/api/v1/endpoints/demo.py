@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.config import settings
 from app.models.job import DemoJobResponse, OperationType, UploadResponse
-from app.api.v1.endpoints.upload import _create_job
+from app.api.v1.endpoints.upload import _create_job, _read_upload_bounded
 
 router = APIRouter()
 
@@ -27,7 +27,9 @@ async def demo_fault_job(
         )
 
     content_type = (file.content_type or "application/octet-stream").split(";")[0].strip()
-    file_data = await file.read()
+    file_data = await _read_upload_bounded(
+        file, settings.max_file_size_mb * 1024 * 1024
+    )
 
     try:
         chunk_ids = sorted({int(x) for x in fail_chunks.split(",") if x.strip()})

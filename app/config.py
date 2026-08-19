@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     api_key_secret: Optional[str] = None  # if set, X-API-Key header required
     max_file_size_mb: int = 500          # reject uploads larger than this
 
+    # Rate limiting (0 = disabled). Limits POST requests per client IP per minute.
+    rate_limit_per_minute: int = 0
+    # CSP connect-src value. "'self'" keeps the SPA on its own origin; set the
+    # remote API base here if the SPA is pointed at a separate backend.
+    csp_connect_src: str = "'self'"
+    # Emit Strict-Transport-Security (only meaningful behind real TLS).
+    allow_hsts: bool = True
+
     # Fault-injection demo (dev/demo environments only). When enabled, the
     # /api/v1/upload endpoint accepts demo_fail_chunks to simulate worker
     # failures so the fault-tolerance path can be observed. Disabled by default.

@@ -236,6 +236,12 @@ class Orchestrator:
             except Exception as cleanup_err:
                 logger.warning(f"Chunk cleanup failed for {job_id}: {cleanup_err}")
 
+            # The raw upload is no longer needed once the job is terminal.
+            try:
+                storage_service.delete_raw_file(job_id, extension=file_ext)
+            except Exception as cleanup_err:
+                logger.warning(f"Raw file cleanup failed for {job_id}: {cleanup_err}")
+
         except Exception as exc:
             logger.error(f"Job {job_id} failed: {exc}")
             # Re-fetch metadata in case it changed; fall back to the copy we have
