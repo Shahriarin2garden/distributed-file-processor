@@ -66,12 +66,21 @@ app.add_middleware(
 
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    """Optional API key gate. Disabled when API_KEY_SECRET is unset."""
+    """Optional API key gate. Disabled when API_KEY_SECRET is unset.
+
+    Browser requests from an allowed origin (the SPA) pass through without
+    the key so the public UI works for real users; direct API calls from
+    scripts/curl still require X-API-Key.
+    """
     if settings.api_key_secret:
         public_paths = {"/health", "/docs", "/openapi.json", "/redoc", "/"}
         if request.url.path not in public_paths and not request.url.path.startswith("/static"):
+            origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
+            origin = origin.rstrip("/")
+            allowed = {o.rstrip("/") for o in settings.allowed_origins.split(",")}
+            from_ui = any(origin == o or origin.startswith(o + "/") for o in allowed if o)
             key = request.headers.get("X-API-Key")
-            if not key or key != settings.api_key_secret:
+            if not from_ui and (not key or key != settings.api_key_secret):
                 return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     response = await call_next(request)
     # Never let the browser keep stale UI assets: the SPA and its ES-module
